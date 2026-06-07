@@ -1,0 +1,10 @@
+{
+  "razer_gold": {"ar":"Razer Gold","en":"Razer Gold","ru":"Razer Gold","items":[["razer_5","$5",4.20],["razer_10","$10",8.40],["razer_20","$20",16.80],["razer_50","$50",42.00],["razer_100","$100",84.00],["razer_200","$200",168.00]]},
+  "steam_usa": {"ar":"Steam USA","en":"Steam USA","ru":"Steam USA","items":[["steam_5","$5",3.90],["steam_10","$10",7.80],["steam_20","$20",15.60],["steam_50","$50",39.00],["steam_100","$100",78.00],["steam_200","$200",156.00]]},
+  "playstation_usa": {"ar":"PlayStation USA","en":"PlayStation USA","ru":"PlayStation USA","items":[["ps_5","$5",3.90],["ps_10","$10",7.80],["ps_20","$20",15.60],["ps_50","$50",39.00],["ps_100","$100",78.00],["ps_200","$200",156.00]]},
+  "itunes_usa": {"ar":"iTunes USA","en":"iTunes USA","ru":"iTunes USA","items":[["itunes_5","$5",3.90],["itunes_10","$10",7.80],["itunes_20","$20",15.60],["itunes_50","$50",39.00],["itunes_100","$100",78.00],["itunes_200","$200",156.00]]},
+  "pubg_uc": {"ar":"PUBG UC","en":"PUBG UC","ru":"PUBG UC","items":[["pubg_60","60 UC",0.84],["pubg_325","325 UC",4.10],["pubg_660","660 UC",8.40],["pubg_1800","1800 UC",21.00],["pubg_3850","3850 UC",42.00],["pubg_8100","8100 UC",84.00]]},
+  "yalla_ludo": {"ar":"Yalla Ludo","en":"Yalla Ludo","ru":"Yalla Ludo","items":[["yalla_2200","2200 Diamonds",null]]},
+  "itunes_account_9plus": {"ar":"iTunes Account 9+","en":"iTunes Account 9+","ru":"iTunes Account 9+","items":[["ia_100","$100 Account",80.00],["ia_110","$110 Account",88.00],["ia_125","$125 Account",100.00],["ia_150","$150 Account",120.00],["ia_170","$170 Account",136.00],["ia_200","$200 Account",160.00],["ia_221","$221 Account",176.80],["ia_300","$300 Account",240.00],["ia_340","$340 Account",272.00]]},
+  "roblox": {"ar":"Roblox Gift Cards","en":"Roblox Gift Cards","ru":"Roblox Gift Cards","items":[["roblox_5_30","$5.30",4.13],["roblox_10","$10",7.80],["roblox_15","$15",11.70],["roblox_20","$20",15.60],["roblox_25","$25",19.50],["roblox_50","$50",39.00],["roblox_100","$100",78.00],["roblox_125","$125",97.50]]}
+}
