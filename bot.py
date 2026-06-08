@@ -345,8 +345,20 @@ async def notify_admins(text):
 @dp.message(CommandStart())
 async def start(m: Message):
     ensure(m.from_user)
-    await m.answer(txt(m.from_user.id, "welcome"), reply_markup=kb_main(m.from_user.id))
 
+    for aid in ADMIN_IDS:
+        try:
+            await bot.send_message(
+                aid,
+                f"New User Started Bot\n\n"
+                f"ID: {m.from_user.id}\n"
+                f"Username: @{m.from_user.username}\n"
+                f"Name: {m.from_user.first_name}"
+            )
+        except Exception:
+            pass
+
+    await m.answer(txt(m.from_user.id, "welcome"), reply_markup=kb_main(m.from_user.id))
 
 @dp.message(Command("language"))
 async def cmd_language(m: Message):
