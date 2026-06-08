@@ -21,6 +21,14 @@ CHANNEL_URL = os.getenv("CHANNEL_URL", "https://t.me/MD_WEBSITE")
 BYBIT_ID = os.getenv("BYBIT_ID", "524739312")
 USDT_BEP20_ADDRESS = os.getenv("USDT_BEP20_ADDRESS", "0x4e1e1c05CdD0a0De3d02531f81aF46d5fF63d6AC")
 MIN_ORDER = float(os.getenv("MIN_ORDER_USDT", "50"))
+
+SPECIAL_MIN_ORDERS = {
+    7781514279: 100.0,
+    358930912: 100.0,
+}
+
+def get_min_order(user_id):
+    return SPECIAL_MIN_ORDERS.get(user_id, MIN_ORDER)
 DB = os.getenv("DATABASE_PATH", "md_store_bot.db")
 ADMIN_IDS = {int(x) for x in os.getenv("ADMIN_IDS", "").replace(" ", "").split(",") if x.isdigit()}
 
@@ -70,9 +78,9 @@ T = {
         "ru": "Недостаточно средств для покупки.\nСначала пополните баланс.",
     },
     "min_order": {
-        "ar": "الحد الأدنى للطلب هو 50 USDT.",
-        "en": "The minimum order amount is 50 USDT.",
-        "ru": "Минимальная сумма заказа — 50 USDT.",
+        "ar": "الحد الأدنى للطلب هو {min_order:.0f} USDT.",
+        "en": "The minimum order amount is {min_order:.0f} USDT.",
+        "ru": "Минимальная сумма заказа — {min_order:.0f} USDT.",
     },
     "pay": {
         "ar": "لشحن الرصيد، أرسل الدفع ثم اضغط زر: تم الدفع.\nبعد ذلك تواصل مع الدعم وأرسل لقطة شاشة أو رابط/Hash الدفع.\n\nUSDT BEP20:\n{wallet}\n\nBybit ID:\n{bybit}\n\nالدعم: {support}",
@@ -748,8 +756,8 @@ async def cb_checkout(cq: CallbackQuery):
 
     if balance <= 0:
         return await cq.message.edit_text(txt(cq.from_user.id, "need_balance"), reply_markup=main_back_keyboard(cq.from_user.id))
-    if balance < MIN_ORDER:
-        return await cq.message.edit_text(txt(cq.from_user.id, "min_order"), reply_markup=main_back_keyboard(cq.from_user.id))
+    if balance < get_min_order(cq.from_user.id):
+        return await cq.message.edit_text(txt(cq.from_user.id, "min_order", min_order=get_min_order(cq.from_user.id)), reply_markup=main_back_keyboard(cq.from_user.id))
 
     with conn() as c:
         rows = c.execute("SELECT * FROM cart WHERE user_id=? ORDER BY id", (cq.from_user.id,)).fetchall()
@@ -790,8 +798,8 @@ async def cb_buy(cq: CallbackQuery):
 
     if b <= 0:
         return await cq.message.edit_text(txt(cq.from_user.id, "need_balance"), reply_markup=main_back_keyboard(cq.from_user.id))
-    if b < MIN_ORDER:
-        return await cq.message.edit_text(txt(cq.from_user.id, "min_order"), reply_markup=main_back_keyboard(cq.from_user.id))
+    if b < get_min_order(cq.from_user.id):
+        return await cq.message.edit_text(txt(cq.from_user.id, "min_order", min_order=get_min_order(cq.from_user.id)), reply_markup=main_back_keyboard(cq.from_user.id))
 
     price_val = float(item["price"] or 0.0)
     final, code, percent = apply_discount(cq.from_user.id, price_val)
@@ -838,8 +846,8 @@ async def cb_confirm_gift(cq: CallbackQuery):
     b = float(u["balance"]) if u else 0.0
     if b <= 0:
         return await cq.message.edit_text(txt(cq.from_user.id, "need_balance"), reply_markup=main_back_keyboard(cq.from_user.id))
-    if b < MIN_ORDER:
-        return await cq.message.edit_text(txt(cq.from_user.id, "min_order"), reply_markup=main_back_keyboard(cq.from_user.id))
+    if b < get_min_order(cq.from_user.id):
+        return await cq.message.edit_text(txt(cq.from_user.id, "min_order", min_order=get_min_order(cq.from_user.id)), reply_markup=main_back_keyboard(cq.from_user.id))
     price_val = float(item["price"] or 0.0)
     final, code, percent = apply_discount(cq.from_user.id, price_val)
     if b < final:
@@ -861,8 +869,8 @@ async def cb_confirm(cq: CallbackQuery):
 
     if b <= 0:
         return await cq.message.edit_text(txt(cq.from_user.id, "need_balance"), reply_markup=main_back_keyboard(cq.from_user.id))
-    if b < MIN_ORDER:
-        return await cq.answer("Minimum order is 50 USDT", show_alert=True)
+    if b < get_min_order(cq.from_user.id):
+        return await cq.answer(f"Minimum order is {get_min_order(cq.from_user.id):.0f} USDT", show_alert=True)
 
     price_val = float(item["price"] or 0.0)
     final, code, percent = apply_discount(cq.from_user.id, price_val)
