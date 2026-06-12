@@ -2,7 +2,7 @@ import asyncio
 import json
 import os
 import sqlite3
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -19,7 +19,7 @@ BOT_NAME = os.getenv("BOT_NAME", "MD STORE")
 SUPPORT_USERNAME = os.getenv("SUPPORT_USERNAME", "@MD_SUPPORTT")
 CHANNEL_URL = os.getenv("CHANNEL_URL", "https://t.me/MD_WEBSITE")
 BYBIT_ID = os.getenv("BYBIT_ID", "524739312")
-USDT_BEP20_ADDRESS = os.getenv("USDT_BEP20_ADDRESS", "0x4e1e1c05CdD0a0De3d02531f81aF46d5fF63d6AC")
+USDT_BEP20_ADDRESS = os.getenv("USDT_BEP20_ADDRESS", "0xA2E0c2eC432953Dd2F832488a1EC061e6e761361")
 MIN_ORDER = float(os.getenv("MIN_ORDER_USDT", "50"))
 
 SPECIAL_MIN_ORDERS = {
@@ -62,6 +62,9 @@ T = {
     "orders": {"ar": "طلباتي", "en": "My Orders", "ru": "Мои заказы"},
     "latest": {"ar": "آخر عمليات الشراء", "en": "Latest Purchases", "ru": "Последние покупки"},
     "support": {"ar": "الدعم", "en": "Support", "ru": "Поддержка"},
+    "faq": {"ar": "الأسئلة الشائعة", "en": "FAQ", "ru": "FAQ"},
+    "referrals": {"ar": "الإحالات", "en": "Referrals", "ru": "Рефералы"},
+    "copy_usdt": {"ar": "نسخ عنوان USDT", "en": "Copy USDT Address", "ru": "Скопировать USDT"},
     "channel": {"ar": "القناة الرسمية", "en": "Official Channel", "ru": "Официальный канал"},
     "language": {"ar": "اللغة", "en": "Language", "ru": "Язык"},
     "back": {"ar": "رجوع", "en": "Back", "ru": "Назад"},
@@ -175,6 +178,15 @@ def init_db():
             status TEXT DEFAULT 'pending',
             created_at TEXT
         )""")
+        c.execute("""CREATE TABLE IF NOT EXISTS settings(
+            key TEXT PRIMARY KEY,
+            value TEXT
+        )""")
+        c.execute("""CREATE TABLE IF NOT EXISTS referrals(
+            invited_id INTEGER PRIMARY KEY,
+            referrer_id INTEGER,
+            created_at TEXT
+        )""")
 
         # Safe migrations for old database versions on Railway.
         # CREATE TABLE IF NOT EXISTS does not add new columns to existing tables,
@@ -184,6 +196,10 @@ def init_db():
             c.execute("ALTER TABLE users ADD COLUMN active_coupon TEXT DEFAULT ''")
         if "created_at" not in user_cols:
             c.execute("ALTER TABLE users ADD COLUMN created_at TEXT")
+        if "referred_by" not in user_cols:
+            c.execute("ALTER TABLE users ADD COLUMN referred_by INTEGER DEFAULT 0")
+        if "referral_earnings" not in user_cols:
+            c.execute("ALTER TABLE users ADD COLUMN referral_earnings REAL DEFAULT 0")
 
         order_cols = {row[1] for row in c.execute("PRAGMA table_info(orders)").fetchall()}
         if "gift_to" not in order_cols:
@@ -193,14 +209,20 @@ def init_db():
 
         c.commit()
 
-def ensure(u):
+def ensure(u, referrer_id: int = 0):
     with conn() as c:
-        r = c.execute("SELECT user_id FROM users WHERE user_id=?", (u.id,)).fetchone()
+        r = c.execute("SELECT user_id, referred_by FROM users WHERE user_id=?", (u.id,)).fetchone()
         if not r:
+            valid_ref = int(referrer_id) if referrer_id and int(referrer_id) != int(u.id) else 0
             c.execute(
-                "INSERT INTO users(user_id, username, first_name, lang, balance, active_coupon, created_at) VALUES(?,?,?,?,?,?,?)",
-                (u.id, u.username or "", u.first_name or "", "en", 0.0, "", datetime.utcnow().isoformat()),
+                "INSERT INTO users(user_id, username, first_name, lang, balance, active_coupon, created_at, referred_by, referral_earnings) VALUES(?,?,?,?,?,?,?,?,?)",
+                (u.id, u.username or "", u.first_name or "", "en", 0.0, "", datetime.utcnow().isoformat(), valid_ref, 0.0),
             )
+            if valid_ref:
+                c.execute(
+                    "INSERT OR IGNORE INTO referrals(invited_id, referrer_id, created_at) VALUES(?,?,?)",
+                    (u.id, valid_ref, datetime.utcnow().isoformat()),
+                )
         else:
             c.execute("UPDATE users SET username=?, first_name=? WHERE user_id=?", (u.username or "", u.first_name or "", u.id))
         c.commit()
@@ -269,16 +291,51 @@ def product_name(cat_key, item, l):
 def price_text(price):
     return "Available" if price is None else f"{float(price):.2f} USDT"
 
+def get_setting(key: str, default: str = "") -> str:
+    with conn() as c:
+        row = c.execute("SELECT value FROM settings WHERE key=?", (key,)).fetchone()
+    return row["value"] if row else default
+
+def set_setting(key: str, value: str):
+    with conn() as c:
+        c.execute("INSERT OR REPLACE INTO settings(key, value) VALUES(?,?)", (key, value))
+        c.commit()
+
+def start_flash_discount(percent: float = 2.0, hours: int = 24):
+    until = (datetime.utcnow() + timedelta(hours=hours)).isoformat()
+    set_setting("flash_discount_percent", str(percent))
+    set_setting("flash_discount_until", until)
+    return until
+
+def get_flash_discount():
+    try:
+        until_raw = get_setting("flash_discount_until", "")
+        percent = float(get_setting("flash_discount_percent", "0") or 0)
+        if not until_raw or percent <= 0:
+            return "", 0.0
+        until = datetime.fromisoformat(until_raw)
+        if datetime.utcnow() >= until:
+            set_setting("flash_discount_percent", "0")
+            return "", 0.0
+        return "24H_DISCOUNT", percent
+    except Exception:
+        return "", 0.0
+
 def get_discount(uid):
+    flash_code, flash_percent = get_flash_discount()
     u = user(uid)
     code = (u["active_coupon"] if u and "active_coupon" in u.keys() else "") or ""
-    if not code:
-        return "", 0.0
-    with conn() as c:
-        row = c.execute("SELECT * FROM coupons WHERE code=? AND active=1", (code.upper(),)).fetchone()
-    if not row:
-        return "", 0.0
-    return row["code"], float(row["discount"])
+    coupon_code, coupon_percent = "", 0.0
+    if code:
+        with conn() as c:
+            row = c.execute("SELECT * FROM coupons WHERE code=? AND active=1", (code.upper(),)).fetchone()
+        if row:
+            coupon_code, coupon_percent = row["code"], float(row["discount"])
+    if flash_percent >= coupon_percent and flash_percent > 0:
+        return flash_code, flash_percent
+    if coupon_percent > 0:
+        return coupon_code, coupon_percent
+    return "", 0.0
 
 def apply_discount(uid, amount):
     code, percent = get_discount(uid)
@@ -287,6 +344,25 @@ def apply_discount(uid, amount):
     discount_amount = amount * (percent / 100.0)
     final = max(amount - discount_amount, 0)
     return final, code, percent
+
+def add_referral_commission(buyer_id: int, amount: float, percent: float = 3.0):
+    u = user(buyer_id)
+    if not u or "referred_by" not in u.keys():
+        return
+    referrer = int(u["referred_by"] or 0)
+    if not referrer or referrer == buyer_id or amount <= 0:
+        return
+    commission = round(amount * (percent / 100.0), 2)
+    with conn() as c:
+        c.execute("UPDATE users SET balance=balance+?, referral_earnings=referral_earnings+? WHERE user_id=?", (commission, commission, referrer))
+        c.commit()
+
+def referral_stats(uid: int):
+    with conn() as c:
+        invited = c.execute("SELECT COUNT(*) AS n FROM referrals WHERE referrer_id=?", (uid,)).fetchone()["n"]
+        u = c.execute("SELECT referral_earnings FROM users WHERE user_id=?", (uid,)).fetchone()
+    earnings = float(u["referral_earnings"] or 0.0) if u else 0.0
+    return invited, earnings
 
 def kb_lang():
     return InlineKeyboardMarkup(inline_keyboard=[
@@ -302,6 +378,7 @@ def kb_main(uid):
         [InlineKeyboardButton(text=T["cart"][l], callback_data="cart"), InlineKeyboardButton(text=T["favorites"][l], callback_data="favorites")],
         [InlineKeyboardButton(text=T["orders"][l], callback_data="orders"), InlineKeyboardButton(text=T["latest"][l], callback_data="latest")],
         [InlineKeyboardButton(text=T["support"][l], callback_data="support"), InlineKeyboardButton(text=T["language"][l], callback_data="choose_lang")],
+        [InlineKeyboardButton(text=T["faq"][l], callback_data="faq"), InlineKeyboardButton(text=T["referrals"][l], callback_data="referrals")],
         [InlineKeyboardButton(text=T["channel"][l], url=CHANNEL_URL)],
     ])
 
@@ -334,6 +411,7 @@ def kb_product_actions(uid, cat_key, pid):
 def payment_keyboard(uid):
     l = lang(uid)
     return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text=T["copy_usdt"][l], callback_data="copy_usdt")],
         [InlineKeyboardButton(text=T["i_paid"][l], callback_data="paid")],
         [InlineKeyboardButton(text=SUPPORT_USERNAME, url=f"https://t.me/{SUPPORT_USERNAME.replace('@','')}")],
         [InlineKeyboardButton(text=T["back"][l], callback_data="main")],
@@ -352,7 +430,13 @@ async def notify_admins(text):
 
 @dp.message(CommandStart())
 async def start(m: Message):
-    ensure(m.from_user)
+    referrer_id = 0
+    parts = (m.text or "").split(maxsplit=1)
+    if len(parts) > 1:
+        payload = parts[1].strip()
+        if payload.startswith("ref_") and payload[4:].isdigit():
+            referrer_id = int(payload[4:])
+    ensure(m.from_user, referrer_id)
 
     for aid in ADMIN_IDS:
         try:
@@ -361,7 +445,8 @@ async def start(m: Message):
                 f"New User Started Bot\n\n"
                 f"ID: {m.from_user.id}\n"
                 f"Username: @{m.from_user.username}\n"
-                f"Name: {m.from_user.first_name}"
+                f"Name: {m.from_user.first_name}\n"
+                f"Referrer ID: {referrer_id or 'None'}"
             )
         except Exception:
             pass
@@ -388,7 +473,8 @@ async def admin_panel(m: Message):
         "/broadcast MESSAGE\n"
         "/addcoupon CODE PERCENT\n"
         "/delcoupon CODE\n"
-        "/coupons"
+        "/coupons\n"
+        "/discount24"
     )
 
 @dp.message(Command("addbalance"))
@@ -525,6 +611,14 @@ async def cmd_coupons(m: Message):
         return await m.answer("No coupons.")
     await m.answer("\n".join([f"{r['code']} | {r['discount']}% | {'active' if r['active'] else 'off'}" for r in rows]))
 
+
+@dp.message(Command("discount24"))
+async def cmd_discount24(m: Message):
+    if not admin(m.from_user.id):
+        return await m.answer(T["admin_only"]["en"])
+    until = start_flash_discount(2.0, 24)
+    await m.answer(f"2% discount activated for 24 hours. Ends UTC: {until}")
+
 @dp.message(Command("coupon"))
 async def cmd_coupon(m: Message):
     ensure(m.from_user)
@@ -582,6 +676,69 @@ async def cb_paid(cq: CallbackQuery):
         f"Payment Notice #{pid}\n\nUser ID: {cq.from_user.id}\nUsername: @{cq.from_user.username}\nStatus: Pending\n\nAsk the user for screenshot/hash if needed."
     )
     await cq.message.edit_text(txt(cq.from_user.id, "paid_sent"), reply_markup=main_back_keyboard(cq.from_user.id))
+    await cq.answer()
+
+
+@dp.callback_query(F.data == "copy_usdt")
+async def cb_copy_usdt(cq: CallbackQuery):
+    await cq.answer(f"USDT BEP20:\n{USDT_BEP20_ADDRESS}", show_alert=True)
+
+@dp.callback_query(F.data == "faq")
+async def cb_faq(cq: CallbackQuery):
+    l = lang(cq.from_user.id)
+    if l == "ar":
+        text = (
+            "الأسئلة الشائعة\n\n"
+            "من نحن؟\n"
+            "نحن MD STORE متجر متخصص في بيع البطاقات الرقمية وشحن الألعاب للتجار والعملاء مع دعم سريع وأسعار مناسبة.\n\n"
+            "كيف أثق؟\n"
+            f"يمكنك التواصل معنا للحصول على مراجعات وتجارب العملاء عبر {SUPPORT_USERNAME}.\n\n"
+            "كيف يعمل البوت؟\n"
+            "تختار المنتج ثم تشحن محفظتك داخل البوت وتؤكد الطلب وبعدها يتم تجهيز وتسليم الكود.\n\n"
+            "هل الأكواد فورية؟\n"
+            "نعم، الأكواد تسليم فوري وصالحة للتخزين سنة كاملة."
+        )
+    elif l == "ru":
+        text = (
+            "FAQ\n\n"
+            "Кто мы?\n"
+            "MD STORE — магазин цифровых карт и игровых пополнений для клиентов и реселлеров.\n\n"
+            "Как доверять?\n"
+            f"Свяжитесь с нами для отзывов клиентов: {SUPPORT_USERNAME}.\n\n"
+            "Как работает бот?\n"
+            "Вы выбираете товар, пополняете баланс в боте, подтверждаете заказ, затем получаете код.\n\n"
+            "Коды быстрые?\n"
+            "Да, доставка мгновенная, коды можно хранить целый год."
+        )
+    else:
+        text = (
+            "FAQ\n\n"
+            "Who are we?\n"
+            "We are MD STORE, a digital gift card and game top-up store for customers and resellers with fast support and good prices.\n\n"
+            "How can I trust?\n"
+            f"Contact us for customer reviews and proof: {SUPPORT_USERNAME}.\n\n"
+            "How does the bot work?\n"
+            "Choose a product, top up your wallet in the bot, confirm your order, then receive your code.\n\n"
+            "Are codes instant?\n"
+            "Yes, codes are delivered instantly and are valid for storage for a full year."
+        )
+    await cq.message.edit_text(text, reply_markup=main_back_keyboard(cq.from_user.id))
+    await cq.answer()
+
+@dp.callback_query(F.data == "referrals")
+async def cb_referrals(cq: CallbackQuery):
+    ensure(cq.from_user)
+    invited, earnings = referral_stats(cq.from_user.id)
+    bot_username = (await bot.get_me()).username
+    link = f"https://t.me/{bot_username}?start=ref_{cq.from_user.id}"
+    text = (
+        f"Referral System\n\n"
+        f"Your referral link:\n{link}\n\n"
+        f"Invited users: {invited}\n"
+        f"Referral earnings: {earnings:.2f} USDT\n\n"
+        f"Share your link. When your invited users buy, you receive referral balance."
+    )
+    await cq.message.edit_text(text, reply_markup=main_back_keyboard(cq.from_user.id))
     await cq.answer()
 
 @dp.callback_query(F.data == "balance")
@@ -742,6 +899,7 @@ async def create_order(cq: CallbackQuery, product: str, price: float, gift_to: s
         )
         oid = cur.lastrowid
         c.commit()
+    add_referral_commission(cq.from_user.id, price)
     gift_line = f"\nGift To: {gift_to}" if gift_to else ""
     await notify_admins(
         f"New Order #{oid}\n\nUser ID: {cq.from_user.id}\nUsername: @{cq.from_user.username}\nProduct: {product}\nAmount: {price:.2f} USDT{gift_line}"
@@ -882,6 +1040,33 @@ async def cb_confirm(cq: CallbackQuery):
     await create_order(cq, pname, final)
     await cq.message.edit_text(txt(cq.from_user.id, "order_done"), reply_markup=main_back_keyboard(cq.from_user.id))
     await cq.answer()
+
+@dp.message()
+async def forward_user_messages_to_admin(m: Message):
+    ensure(m.from_user)
+    if admin(m.from_user.id):
+        return
+    content = m.text or m.caption or ""
+    if not content:
+        if m.photo:
+            content = "[Photo]"
+        elif m.document:
+            content = f"[Document] {m.document.file_name or ''}"
+        elif m.sticker:
+            content = "[Sticker]"
+        elif m.video:
+            content = "[Video]"
+        elif m.voice:
+            content = "[Voice]"
+        else:
+            content = "[Non-text message]"
+    await notify_admins(
+        f"User Message\n\n"
+        f"ID: {m.from_user.id}\n"
+        f"Username: @{m.from_user.username}\n"
+        f"Name: {m.from_user.first_name}\n\n"
+        f"Message:\n{content}"
+    )
 
 async def main():
     init_db()
