@@ -681,7 +681,13 @@ async def cb_paid(cq: CallbackQuery):
 
 @dp.callback_query(F.data == "copy_usdt")
 async def cb_copy_usdt(cq: CallbackQuery):
-    await cq.answer(f"USDT BEP20:\n{USDT_BEP20_ADDRESS}", show_alert=True)
+    # Telegram bots cannot copy text directly to the user's clipboard.
+    # This sends the wallet address alone in a separate message so the user can copy it easily.
+    await cq.answer("USDT address sent below")
+    await cq.message.answer(
+        f"USDT BEP20 Address:\n\n`{USDT_BEP20_ADDRESS}`\n\nTap and hold the address to copy it.",
+        parse_mode="Markdown"
+    )
 
 @dp.callback_query(F.data == "faq")
 async def cb_faq(cq: CallbackQuery):
