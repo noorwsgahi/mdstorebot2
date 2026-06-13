@@ -21,7 +21,7 @@ BOT_NAME = os.getenv("BOT_NAME", "MD STORE Global")
 SUPPORT_USERNAME = os.getenv("SUPPORT_USERNAME", "@bot_MD_global")
 CHANNEL_URL = os.getenv("CHANNEL_URL", "https://t.me/MD_WEBSITE")
 WEB_APP_URL = os.getenv("WEB_APP_URL", "https://mdgiftshop-94hvjt93.manus.space/")
-WELCOME_PHOTO_PATH = os.getenv("WELCOME_PHOTO_PATH", "md_store_welcome.jpg")
+WELCOME_PHOTO_PATH = os.getenv("WELCOME_PHOTO_PATH", "photo_2026-06-13_18-11-52.jpg")
 BYBIT_ID = os.getenv("BYBIT_ID", "524739312")
 USDT_BEP20_ADDRESS = os.getenv("USDT_BEP20_ADDRESS", "0xA2E0c2eC432953Dd2F832488a1EC061e6e761361")
 MIN_ORDER = float(os.getenv("MIN_ORDER_USDT", "50"))
@@ -54,30 +54,30 @@ T = {
         "ru": "Выберите язык:",
     },
     "welcome": {
-        "ar": "أهلاً بك في MD STORE\nمتجر البطاقات الرقمية للتجار والعملاء.\n\nاختر من القائمة:",
-        "en": "Welcome to MD STORE\nDigital gift card marketplace.\n\nChoose from the menu:",
-        "ru": "Добро пожаловать в MD STORE\nМагазин цифровых карт.\n\nВыберите раздел:",
+        "ar": "Welcome to MD STORE\nDigital gift card marketplace.\n\nMD STORE supplies digital cards and game top-ups for traders and resellers.\nFor large quantities and long-term cooperation, contact support.\n\nMinimum order: 50 USDT.\n\nChoose from the menu:",
+        "en": "Welcome to MD STORE\nDigital gift card marketplace.\n\nMD STORE supplies digital cards and game top-ups for traders and resellers.\nFor large quantities and long-term cooperation, contact support.\n\nMinimum order: 50 USDT.\n\nChoose from the menu:",
+        "ru": "Welcome to MD STORE\nDigital gift card marketplace.\n\nMD STORE supplies digital cards and game top-ups for traders and resellers.\nFor large quantities and long-term cooperation, contact support.\n\nMinimum order: 50 USDT.\n\nChoose from the menu:",
     },
     "shop": {"ar": "🛍 Shop", "en": "🛍 Shop", "ru": "🛍 Shop"},
     "products": {"ar": "Products", "en": "Products", "ru": "Products"},
-    "special_offers": {"ar": "Special Offers", "en": "Special Offers", "ru": "Special Offers"},
-    "best_sellers": {"ar": "Best Sellers", "en": "Best Sellers", "ru": "Best Sellers"},
-    "reviews": {"ar": "Reviews", "en": "Reviews", "ru": "Reviews"},
-    "profile": {"ar": "Profile", "en": "Profile", "ru": "Profile"},
+    "special_offers": {"ar": "🎁 Special Offers", "en": "🎁 Special Offers", "ru": "🎁 Special Offers"},
+    "best_sellers": {"ar": "⭐ Best Sellers", "en": "⭐ Best Sellers", "ru": "⭐ Best Sellers"},
+    "reviews": {"ar": "📝 Reviews", "en": "📝 Reviews", "ru": "📝 Reviews"},
+    "profile": {"ar": "👤 Profile", "en": "👤 Profile", "ru": "👤 Profile"},
     "coupons": {"ar": "Coupons", "en": "Coupons", "ru": "Coupons"},
     "wholesale": {"ar": "Wholesale Prices", "en": "Wholesale Prices", "ru": "Wholesale Prices"},
     "topup": {"ar": "شحن الرصيد", "en": "Top Up Balance", "ru": "Пополнить баланс"},
-    "balance": {"ar": "الرصيد", "en": "Balance", "ru": "Баланс"},
-    "cart": {"ar": "السلة", "en": "Cart", "ru": "Корзина"},
-    "favorites": {"ar": "المفضلة", "en": "Favorites", "ru": "Избранное"},
-    "orders": {"ar": "My Orders", "en": "My Orders", "ru": "My Orders"},
+    "balance": {"ar": "💰 Balance", "en": "💰 Balance", "ru": "💰 Balance"},
+    "cart": {"ar": "🛒 Cart", "en": "🛒 Cart", "ru": "🛒 Cart"},
+    "favorites": {"ar": "❤️ Favorites", "en": "❤️ Favorites", "ru": "❤️ Favorites"},
+    "orders": {"ar": "📦 My Orders", "en": "📦 My Orders", "ru": "📦 My Orders"},
     "latest": {"ar": "آخر عمليات الشراء", "en": "Latest Purchases", "ru": "Последние покупки"},
-    "support": {"ar": "الدعم", "en": "Support", "ru": "Поддержка"},
+    "support": {"ar": "💬 Support", "en": "💬 Support", "ru": "💬 Support"},
     "faq": {"ar": "الأسئلة الشائعة", "en": "FAQ", "ru": "FAQ"},
-    "referrals": {"ar": "الإحالات", "en": "Referrals", "ru": "Рефералы"},
+    "referrals": {"ar": "👥 Referrals", "en": "👥 Referrals", "ru": "👥 Referrals"},
     "copy_usdt": {"ar": "نسخ عنوان USDT", "en": "Copy USDT Address", "ru": "Скопировать USDT"},
-    "channel": {"ar": "Official Channel", "en": "Official Channel", "ru": "Official Channel"},
-    "language": {"ar": "اللغة", "en": "Language", "ru": "Язык"},
+    "channel": {"ar": "📢 Official Channel", "en": "📢 Official Channel", "ru": "📢 Official Channel"},
+    "language": {"ar": "🌍 Language", "en": "🌍 Language", "ru": "🌍 Language"},
     "back": {"ar": "رجوع", "en": "Back", "ru": "Назад"},
     "main": {"ar": "القائمة الرئيسية", "en": "Main Menu", "ru": "Главное меню"},
     "category_text": {"ar": "اختر المنتج:", "en": "Choose product:", "ru": "Выберите товар:"},
@@ -390,14 +390,12 @@ def kb_main(uid):
     rows = [
         [InlineKeyboardButton(text=T["shop"][l], web_app=WebAppInfo(url=WEB_APP_URL))],
         [InlineKeyboardButton(text=T["products"][l], callback_data="shop")],
-        [InlineKeyboardButton(text=T["topup"][l], callback_data="topup"), InlineKeyboardButton(text=T["balance"][l], callback_data="balance")],
-        [InlineKeyboardButton(text=T["cart"][l], callback_data="cart"), InlineKeyboardButton(text=T["favorites"][l], callback_data="favorites")],
-        [InlineKeyboardButton(text=T["orders"][l], callback_data="orders"), InlineKeyboardButton(text=T["latest"][l], callback_data="latest")],
         [InlineKeyboardButton(text=T["special_offers"][l], callback_data="special_offers"), InlineKeyboardButton(text=T["best_sellers"][l], callback_data="best_sellers")],
+        [InlineKeyboardButton(text=T["orders"][l], callback_data="orders"), InlineKeyboardButton(text=T["balance"][l], callback_data="balance")],
+        [InlineKeyboardButton(text=T["cart"][l], callback_data="cart"), InlineKeyboardButton(text=T["favorites"][l], callback_data="favorites")],
         [InlineKeyboardButton(text=T["profile"][l], callback_data="profile"), InlineKeyboardButton(text=T["language"][l], callback_data="choose_lang")],
-        [InlineKeyboardButton(text=T["support"][l], callback_data="support"), InlineKeyboardButton(text=T["faq"][l], callback_data="faq")],
-        [InlineKeyboardButton(text=T["referrals"][l], callback_data="referrals"), InlineKeyboardButton(text=T["coupons"][l], callback_data="coupons")],
-        [InlineKeyboardButton(text=T["reviews"][l], web_app=WebAppInfo(url=web_reviews_url())), InlineKeyboardButton(text=T["channel"][l], url=CHANNEL_URL)],
+        [InlineKeyboardButton(text=T["referrals"][l], callback_data="referrals"), InlineKeyboardButton(text=T["reviews"][l], web_app=WebAppInfo(url=web_reviews_url()))],
+        [InlineKeyboardButton(text=T["support"][l], callback_data="support"), InlineKeyboardButton(text=T["channel"][l], url=CHANNEL_URL)],
     ]
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
@@ -451,6 +449,7 @@ async def send_welcome_message(m: Message):
     photo_candidates = [
         Path(WELCOME_PHOTO_PATH),
         BASE_DIR / WELCOME_PHOTO_PATH,
+        BASE_DIR / "photo_2026-06-13_18-11-52.jpg",
         BASE_DIR / "md_store_welcome.jpg",
     ]
     for photo_path in photo_candidates:
