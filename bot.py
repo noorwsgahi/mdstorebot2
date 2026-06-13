@@ -54,30 +54,30 @@ T = {
         "ru": "Выберите язык:",
     },
     "welcome": {
-        "ar": "Welcome to MD STORE\nDigital gift card marketplace.\n\nMD STORE supplies digital cards and game top-ups for traders and resellers.\nFor large quantities and long-term cooperation, contact support.\n\nMinimum order: 50 USDT.\n\nChoose from the menu:",
-        "en": "Welcome to MD STORE\nDigital gift card marketplace.\n\nMD STORE supplies digital cards and game top-ups for traders and resellers.\nFor large quantities and long-term cooperation, contact support.\n\nMinimum order: 50 USDT.\n\nChoose from the menu:",
-        "ru": "Welcome to MD STORE\nDigital gift card marketplace.\n\nMD STORE supplies digital cards and game top-ups for traders and resellers.\nFor large quantities and long-term cooperation, contact support.\n\nMinimum order: 50 USDT.\n\nChoose from the menu:",
+        "ar": "مرحبا بك في MD STORE\nمتجر البطاقات الرقمية وشحن الالعاب.\n\nنحن نوفر بطاقات رقمية وشحن العاب للتجار والعملاء.\nللكميات الكبيرة والتعاون طويل المدى تواصل مع الدعم.\n\nاختر من القائمة:",
+        "en": "Welcome to MD STORE\nDigital gift card marketplace.\n\nMD STORE supplies digital cards and game top-ups for traders and resellers.\nFor large quantities and long-term cooperation, contact support.\n\nChoose from the menu:",
+        "ru": "Добро пожаловать в MD STORE\nМаркетплейс цифровых подарочных карт.\n\nMD STORE поставляет цифровые карты и пополнения игр для клиентов и реселлеров.\nДля крупных заказов и долгосрочного сотрудничества свяжитесь с поддержкой.\n\nВыберите пункт меню:",
     },
-    "shop": {"ar": "🛍 Shop", "en": "🛍 Shop", "ru": "🛍 Shop"},
-    "products": {"ar": "Products", "en": "Products", "ru": "Products"},
-    "special_offers": {"ar": "🎁 Special Offers", "en": "🎁 Special Offers", "ru": "🎁 Special Offers"},
-    "best_sellers": {"ar": "⭐ Best Sellers", "en": "⭐ Best Sellers", "ru": "⭐ Best Sellers"},
-    "reviews": {"ar": "📝 Reviews", "en": "📝 Reviews", "ru": "📝 Reviews"},
-    "profile": {"ar": "👤 Profile", "en": "👤 Profile", "ru": "👤 Profile"},
+    "shop": {"ar": "🛍 المتجر", "en": "🛍 Shop", "ru": "🛍 Магазин"},
+    "products": {"ar": "المنتجات", "en": "Products", "ru": "Товары"},
+    "special_offers": {"ar": "🎁 العروض", "en": "🎁 Special Offers", "ru": "🎁 Акции"},
+    "best_sellers": {"ar": "⭐ الاكثر مبيعا", "en": "⭐ Best Sellers", "ru": "⭐ Хиты продаж"},
+    "reviews": {"ar": "📝 المراجعات", "en": "📝 Reviews", "ru": "📝 Отзывы"},
+    "profile": {"ar": "👤 الحساب", "en": "👤 Profile", "ru": "👤 Профиль"},
     "coupons": {"ar": "Coupons", "en": "Coupons", "ru": "Coupons"},
     "wholesale": {"ar": "Wholesale Prices", "en": "Wholesale Prices", "ru": "Wholesale Prices"},
     "topup": {"ar": "شحن الرصيد", "en": "Top Up Balance", "ru": "Пополнить баланс"},
-    "balance": {"ar": "💰 Balance", "en": "💰 Balance", "ru": "💰 Balance"},
-    "cart": {"ar": "🛒 Cart", "en": "🛒 Cart", "ru": "🛒 Cart"},
-    "favorites": {"ar": "❤️ Favorites", "en": "❤️ Favorites", "ru": "❤️ Favorites"},
-    "orders": {"ar": "📦 My Orders", "en": "📦 My Orders", "ru": "📦 My Orders"},
+    "balance": {"ar": "💰 الرصيد", "en": "💰 Balance", "ru": "💰 Баланс"},
+    "cart": {"ar": "🛒 السلة", "en": "🛒 Cart", "ru": "🛒 Корзина"},
+    "favorites": {"ar": "❤️ المفضلة", "en": "❤️ Favorites", "ru": "❤️ Избранное"},
+    "orders": {"ar": "📦 طلباتي", "en": "📦 My Orders", "ru": "📦 Мои заказы"},
     "latest": {"ar": "آخر عمليات الشراء", "en": "Latest Purchases", "ru": "Последние покупки"},
-    "support": {"ar": "💬 Support", "en": "💬 Support", "ru": "💬 Support"},
+    "support": {"ar": "💬 الدعم", "en": "💬 Support", "ru": "💬 Поддержка"},
     "faq": {"ar": "الأسئلة الشائعة", "en": "FAQ", "ru": "FAQ"},
-    "referrals": {"ar": "👥 Referrals", "en": "👥 Referrals", "ru": "👥 Referrals"},
+    "referrals": {"ar": "👥 الاحالات", "en": "👥 Referrals", "ru": "👥 Рефералы"},
     "copy_usdt": {"ar": "نسخ عنوان USDT", "en": "Copy USDT Address", "ru": "Скопировать USDT"},
-    "channel": {"ar": "📢 Official Channel", "en": "📢 Official Channel", "ru": "📢 Official Channel"},
-    "language": {"ar": "🌍 Language", "en": "🌍 Language", "ru": "🌍 Language"},
+    "channel": {"ar": "📢 القناة الرسمية", "en": "📢 Official Channel", "ru": "📢 Официальный канал"},
+    "language": {"ar": "🌍 اللغة", "en": "🌍 Language", "ru": "🌍 Язык"},
     "back": {"ar": "رجوع", "en": "Back", "ru": "Назад"},
     "main": {"ar": "القائمة الرئيسية", "en": "Main Menu", "ru": "Главное меню"},
     "category_text": {"ar": "اختر المنتج:", "en": "Choose product:", "ru": "Выберите товар:"},
@@ -439,22 +439,19 @@ def main_back_keyboard(uid):
     return InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text=T["main"][l], callback_data="main")]])
 
 async def safe_edit(cq: CallbackQuery, text: str, reply_markup=None, **kwargs):
-    """Edit callback message safely. Works when the original message is a photo with caption."""
+    """Edit the current bot message without deleting it, so buttons feel fast and smooth."""
     try:
-        await safe_edit(cq, text, reply_markup=reply_markup, **kwargs)
+        if cq.message and cq.message.photo:
+            await cq.message.edit_caption(caption=text, reply_markup=reply_markup, **kwargs)
+        else:
+            await cq.message.edit_text(text, reply_markup=reply_markup, **kwargs)
         return
     except Exception:
         pass
     try:
-        await cq.message.edit_caption(caption=text, reply_markup=reply_markup, **kwargs)
-        return
+        await cq.message.answer(text, reply_markup=reply_markup, **kwargs)
     except Exception:
         pass
-    try:
-        await cq.message.delete()
-    except Exception:
-        pass
-    await cq.message.answer(text, reply_markup=reply_markup, **kwargs)
 
 async def notify_admins(text):
     for aid in ADMIN_IDS:
