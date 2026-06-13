@@ -375,9 +375,21 @@ def referral_stats(uid: int):
     earnings = float(u["referral_earnings"] or 0.0) if u else 0.0
     return invited, earnings
 
+def styled_button(text: str, *, style: Optional[str] = None, icon_custom_emoji_id: Optional[str] = None, **kwargs) -> InlineKeyboardButton:
+    """
+    Create Telegram inline buttons with the new Bot API color/style fields.
+    Supported styles: danger = red, success = green, primary = blue.
+    """
+    data = {"text": text, **kwargs}
+    if style:
+        data["style"] = style
+    if icon_custom_emoji_id:
+        data["icon_custom_emoji_id"] = icon_custom_emoji_id
+    return InlineKeyboardButton(**data)
+
 def kb_lang():
     return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text=v, callback_data=f"lang:{k}")]
+        [styled_button(text=v, callback_data=f"lang:{k}", style="primary")]
         for k, v in LANGS.items()
     ])
 
@@ -388,14 +400,14 @@ def web_reviews_url():
 def kb_main(uid):
     l = lang(uid)
     rows = [
-        [InlineKeyboardButton(text=T["shop"][l], web_app=WebAppInfo(url=WEB_APP_URL))],
-        [InlineKeyboardButton(text=T["products"][l], callback_data="shop")],
-        [InlineKeyboardButton(text=T["special_offers"][l], callback_data="special_offers"), InlineKeyboardButton(text=T["best_sellers"][l], callback_data="best_sellers")],
-        [InlineKeyboardButton(text=T["orders"][l], callback_data="orders"), InlineKeyboardButton(text=T["balance"][l], callback_data="balance")],
-        [InlineKeyboardButton(text=T["cart"][l], callback_data="cart"), InlineKeyboardButton(text=T["favorites"][l], callback_data="favorites")],
-        [InlineKeyboardButton(text=T["profile"][l], callback_data="profile"), InlineKeyboardButton(text=T["language"][l], callback_data="choose_lang")],
-        [InlineKeyboardButton(text=T["referrals"][l], callback_data="referrals"), InlineKeyboardButton(text=T["reviews"][l], web_app=WebAppInfo(url=web_reviews_url()))],
-        [InlineKeyboardButton(text=T["support"][l], callback_data="support"), InlineKeyboardButton(text=T["channel"][l], url=CHANNEL_URL)],
+        [styled_button(text=T["shop"][l], web_app=WebAppInfo(url=WEB_APP_URL), style="primary")],
+        [styled_button(text=T["products"][l], callback_data="shop", style="primary")],
+        [styled_button(text=T["special_offers"][l], callback_data="special_offers", style="danger"), styled_button(text=T["best_sellers"][l], callback_data="best_sellers", style="danger")],
+        [styled_button(text=T["orders"][l], callback_data="orders", style="primary"), styled_button(text=T["balance"][l], callback_data="balance", style="primary")],
+        [styled_button(text=T["cart"][l], callback_data="cart", style="primary"), styled_button(text=T["favorites"][l], callback_data="favorites", style="primary")],
+        [styled_button(text=T["profile"][l], callback_data="profile", style="primary"), styled_button(text=T["language"][l], callback_data="choose_lang", style="primary")],
+        [styled_button(text=T["referrals"][l], callback_data="referrals", style="danger"), styled_button(text=T["reviews"][l], web_app=WebAppInfo(url=web_reviews_url()), style="success")],
+        [styled_button(text=T["support"][l], callback_data="support", style="success"), styled_button(text=T["channel"][l], url=CHANNEL_URL, style="primary")],
     ]
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
@@ -403,40 +415,40 @@ def kb_cats(uid):
     l = lang(uid)
     rows = []
     for k, v in PRODUCTS.items():
-        rows.append([InlineKeyboardButton(text=v.get(l, v.get("en", k)), callback_data=f"cat:{k}")])
-    rows.append([InlineKeyboardButton(text=T["back"][l], callback_data="main")])
+        rows.append([styled_button(text=v.get(l, v.get("en", k)), callback_data=f"cat:{k}", style="primary")])
+    rows.append([styled_button(text=T["back"][l], callback_data="main", style="danger")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 def kb_items(uid, cat_key):
     l = lang(uid)
     rows = []
     for item in iter_items(cat_key):
-        rows.append([InlineKeyboardButton(text=f"{item['label']} - {price_text(item['price'])}", callback_data=f"view:{cat_key}:{item['id']}")])
-    rows.append([InlineKeyboardButton(text=T["back"][l], callback_data="shop")])
+        rows.append([styled_button(text=f"{item['label']} - {price_text(item['price'])}", callback_data=f"view:{cat_key}:{item['id']}", style="primary")])
+    rows.append([styled_button(text=T["back"][l], callback_data="shop", style="danger")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 def kb_product_actions(uid, cat_key, pid):
     l = lang(uid)
     return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text=T["buy_now"][l], callback_data=f"buy:{cat_key}:{pid}")],
-        [InlineKeyboardButton(text=T["add_cart"][l], callback_data=f"addcart:{cat_key}:{pid}")],
-        [InlineKeyboardButton(text=T["add_fav"][l], callback_data=f"addfav:{cat_key}:{pid}")],
-        [InlineKeyboardButton(text=T["gift"][l], callback_data=f"gift:{cat_key}:{pid}")],
-        [InlineKeyboardButton(text=T["back"][l], callback_data=f"cat:{cat_key}")],
+        [styled_button(text=T["buy_now"][l], callback_data=f"buy:{cat_key}:{pid}", style="success")],
+        [styled_button(text=T["add_cart"][l], callback_data=f"addcart:{cat_key}:{pid}", style="primary")],
+        [styled_button(text=T["add_fav"][l], callback_data=f"addfav:{cat_key}:{pid}", style="danger")],
+        [styled_button(text=T["gift"][l], callback_data=f"gift:{cat_key}:{pid}", style="primary")],
+        [styled_button(text=T["back"][l], callback_data=f"cat:{cat_key}", style="danger")],
     ])
 
 def payment_keyboard(uid):
     l = lang(uid)
     return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text=T["copy_usdt"][l], callback_data="copy_usdt")],
-        [InlineKeyboardButton(text=T["i_paid"][l], callback_data="paid")],
-        [InlineKeyboardButton(text=SUPPORT_USERNAME, url=f"https://t.me/{SUPPORT_USERNAME.replace('@','')}")],
-        [InlineKeyboardButton(text=T["back"][l], callback_data="main")],
+        [styled_button(text=T["copy_usdt"][l], callback_data="copy_usdt", style="primary")],
+        [styled_button(text=T["i_paid"][l], callback_data="paid", style="success")],
+        [styled_button(text=SUPPORT_USERNAME, url=f"https://t.me/{SUPPORT_USERNAME.replace('@','')}", style="success")],
+        [styled_button(text=T["back"][l], callback_data="main", style="danger")],
     ])
 
 def main_back_keyboard(uid):
     l = lang(uid)
-    return InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text=T["main"][l], callback_data="main")]])
+    return InlineKeyboardMarkup(inline_keyboard=[[styled_button(text=T["main"][l], callback_data="main", style="primary")]])
 
 async def safe_edit(cq: CallbackQuery, text: str, reply_markup=None, **kwargs):
     """Edit the current bot message without deleting it, so buttons feel fast and smooth."""
@@ -809,8 +821,8 @@ async def cb_balance(cq: CallbackQuery):
         text += f"\nCoupon: {code} ({discount:.0f}%)"
     text += "\n\n" + txt(cq.from_user.id, "coupon_help")
     await safe_edit(cq, text, reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text=T["topup"][lang(cq.from_user.id)], callback_data="topup")],
-        [InlineKeyboardButton(text=T["back"][lang(cq.from_user.id)], callback_data="main")]
+        [styled_button(text=T["topup"][lang(cq.from_user.id)], callback_data="topup", style="primary")],
+        [styled_button(text=T["back"][lang(cq.from_user.id)], callback_data="main", style="danger")]
     ]))
     await cq.answer()
 
@@ -818,9 +830,9 @@ async def cb_balance(cq: CallbackQuery):
 async def cb_support(cq: CallbackQuery):
     text = txt(cq.from_user.id, "pay", wallet=USDT_BEP20_ADDRESS, bybit=BYBIT_ID, support=SUPPORT_USERNAME)
     await safe_edit(cq, text, reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text=SUPPORT_USERNAME, url=f"https://t.me/{SUPPORT_USERNAME.replace('@','')}")],
-        [InlineKeyboardButton(text=T["channel"][lang(cq.from_user.id)], url=CHANNEL_URL)],
-        [InlineKeyboardButton(text=T["back"][lang(cq.from_user.id)], callback_data="main")]
+        [styled_button(text=SUPPORT_USERNAME, url=f"https://t.me/{SUPPORT_USERNAME.replace('@','')}", style="success")],
+        [styled_button(text=T["channel"][lang(cq.from_user.id)], url=CHANNEL_URL, style="primary")],
+        [styled_button(text=T["back"][lang(cq.from_user.id)], callback_data="main", style="danger")]
     ]))
     await cq.answer()
 
@@ -898,8 +910,8 @@ async def cb_reviews(cq: CallbackQuery):
         "Open the MD STORE Web App to view customer reviews, ratings, and proof of recent deals."
     )
     await safe_edit(cq, text, reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="Open Reviews", web_app=WebAppInfo(url=web_reviews_url()))],
-        [InlineKeyboardButton(text=T["back"][lang(cq.from_user.id)], callback_data="main")]
+        [styled_button(text="Open Reviews", web_app=WebAppInfo(url=web_reviews_url()), style="success")],
+        [styled_button(text=T["back"][lang(cq.from_user.id)], callback_data="main", style="danger")]
     ]))
     await cq.answer()
 
@@ -923,8 +935,8 @@ async def cb_wholesale(cq: CallbackQuery):
         f"Minimum order: {get_min_order(cq.from_user.id):.0f} USDT"
     )
     await safe_edit(cq, text, reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text=SUPPORT_USERNAME, url=f"https://t.me/{SUPPORT_USERNAME.replace('@','')}")],
-        [InlineKeyboardButton(text=T["back"][lang(cq.from_user.id)], callback_data="main")]
+        [styled_button(text=SUPPORT_USERNAME, url=f"https://t.me/{SUPPORT_USERNAME.replace('@','')}", style="success")],
+        [styled_button(text=T["back"][lang(cq.from_user.id)], callback_data="main", style="danger")]
     ]))
     await cq.answer()
 
@@ -984,8 +996,8 @@ async def cb_favorites(cq: CallbackQuery):
     for r in rows:
         item = get_item(r["cat_key"], r["product_id"])
         if item:
-            buttons.append([InlineKeyboardButton(text=product_name(r["cat_key"], item, l), callback_data=f"view:{r['cat_key']}:{r['product_id']}")])
-    buttons.append([InlineKeyboardButton(text=T["back"][l], callback_data="main")])
+            buttons.append([styled_button(text=product_name(r["cat_key"], item, l), callback_data=f"view:{r['cat_key']}:{r['product_id']}", style="primary")])
+    buttons.append([styled_button(text=T["back"][l], callback_data="main", style="danger")])
     await safe_edit(cq, T["favorites"][l], reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons))
     await cq.answer()
 
@@ -1011,9 +1023,9 @@ async def cb_cart(cq: CallbackQuery):
         text += f"\nCoupon: {code} - {percent:.0f}%\nTotal: {final:.2f} USDT"
     text += "\n\n" + txt(cq.from_user.id, "coupon_help")
     await safe_edit(cq, text, reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text=T["checkout"][l], callback_data="checkout")],
-        [InlineKeyboardButton(text=T["clear_cart"][l], callback_data="clearcart")],
-        [InlineKeyboardButton(text=T["back"][l], callback_data="main")]
+        [styled_button(text=T["checkout"][l], callback_data="checkout", style="success")],
+        [styled_button(text=T["clear_cart"][l], callback_data="clearcart", style="danger")],
+        [styled_button(text=T["back"][l], callback_data="main", style="danger")]
     ]))
     await cq.answer()
 
@@ -1108,8 +1120,8 @@ async def cb_buy(cq: CallbackQuery):
 
     text = f"{T['confirm'][l]}\n\nProduct: {pname}\nPrice: {price_line}\nBalance: {b:.2f} USDT"
     await safe_edit(cq, text, reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text=T["confirm"][l], callback_data=f"confirm:{cat_key}:{pid}")],
-        [InlineKeyboardButton(text=T["back"][l], callback_data=f"view:{cat_key}:{pid}")]
+        [styled_button(text=T["confirm"][l], callback_data=f"confirm:{cat_key}:{pid}", style="success")],
+        [styled_button(text=T["back"][l], callback_data=f"view:{cat_key}:{pid}", style="danger")]
     ]))
     await cq.answer()
 
@@ -1124,8 +1136,8 @@ async def cb_gift(cq: CallbackQuery):
     await safe_edit(cq, 
         f"{T['gift'][l]}\n\n{pname}\n\nTo send this as a gift, confirm the purchase then send the recipient details to support.",
         reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text=T["confirm"][l], callback_data=f"confirmgift:{cat_key}:{pid}")],
-            [InlineKeyboardButton(text=T["back"][l], callback_data=f"view:{cat_key}:{pid}")]
+            [styled_button(text=T["confirm"][l], callback_data=f"confirmgift:{cat_key}:{pid}", style="success")],
+            [styled_button(text=T["back"][l], callback_data=f"view:{cat_key}:{pid}", style="danger")]
         ])
     )
     await cq.answer()
