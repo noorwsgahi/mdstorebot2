@@ -9,7 +9,7 @@ from typing import Any, Dict, List, Optional
 from aiogram import Bot, Dispatcher, F
 from aiogram.client.session.aiohttp import AiohttpSession
 from aiogram.filters import Command, CommandStart
-from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message
+from aiogram.types import CallbackQuery, FSInputFile, InlineKeyboardButton, InlineKeyboardMarkup, Message, WebAppInfo
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -18,6 +18,8 @@ BOT_TOKEN = os.getenv("BOT_TOKEN", "").strip()
 BOT_NAME = os.getenv("BOT_NAME", "MD STORE Global")
 SUPPORT_USERNAME = os.getenv("SUPPORT_USERNAME", "@bot_MD_global")
 CHANNEL_URL = os.getenv("CHANNEL_URL", "https://t.me/MD_WEBSITE")
+WEB_APP_URL = os.getenv("WEB_APP_URL", "https://mdgiftshop-94hvjt93.manus.space/")
+WELCOME_PHOTO_PATH = os.getenv("WELCOME_PHOTO_PATH", "md_store_welcome.jpg")
 BYBIT_ID = os.getenv("BYBIT_ID", "524739312")
 USDT_BEP20_ADDRESS = os.getenv("USDT_BEP20_ADDRESS", "0xA2E0c2eC432953Dd2F832488a1EC061e6e761361")
 MIN_ORDER = float(os.getenv("MIN_ORDER_USDT", "50"))
@@ -54,18 +56,25 @@ T = {
         "en": "Welcome to MD STORE\nDigital gift card marketplace.\n\nChoose from the menu:",
         "ru": "Добро пожаловать в MD STORE\nМагазин цифровых карт.\n\nВыберите раздел:",
     },
-    "shop": {"ar": "المتجر", "en": "Shop", "ru": "Магазин"},
+    "shop": {"ar": "🛍 Shop", "en": "🛍 Shop", "ru": "🛍 Shop"},
+    "products": {"ar": "Products", "en": "Products", "ru": "Products"},
+    "special_offers": {"ar": "🎁 Special Offers", "en": "🎁 Special Offers", "ru": "🎁 Special Offers"},
+    "best_sellers": {"ar": "⭐ Best Sellers", "en": "⭐ Best Sellers", "ru": "⭐ Best Sellers"},
+    "reviews": {"ar": "Reviews", "en": "Reviews", "ru": "Reviews"},
+    "profile": {"ar": "Profile", "en": "Profile", "ru": "Profile"},
+    "coupons": {"ar": "Coupons", "en": "Coupons", "ru": "Coupons"},
+    "wholesale": {"ar": "Wholesale Prices", "en": "Wholesale Prices", "ru": "Wholesale Prices"},
     "topup": {"ar": "شحن الرصيد", "en": "Top Up Balance", "ru": "Пополнить баланс"},
     "balance": {"ar": "الرصيد", "en": "Balance", "ru": "Баланс"},
     "cart": {"ar": "السلة", "en": "Cart", "ru": "Корзина"},
     "favorites": {"ar": "المفضلة", "en": "Favorites", "ru": "Избранное"},
-    "orders": {"ar": "طلباتي", "en": "My Orders", "ru": "Мои заказы"},
+    "orders": {"ar": "📦 My Orders", "en": "📦 My Orders", "ru": "📦 My Orders"},
     "latest": {"ar": "آخر عمليات الشراء", "en": "Latest Purchases", "ru": "Последние покупки"},
     "support": {"ar": "الدعم", "en": "Support", "ru": "Поддержка"},
     "faq": {"ar": "الأسئلة الشائعة", "en": "FAQ", "ru": "FAQ"},
     "referrals": {"ar": "الإحالات", "en": "Referrals", "ru": "Рефералы"},
     "copy_usdt": {"ar": "نسخ عنوان USDT", "en": "Copy USDT Address", "ru": "Скопировать USDT"},
-    "channel": {"ar": "القناة الرسمية", "en": "Official Channel", "ru": "Официальный канал"},
+    "channel": {"ar": "📢 Official Channel", "en": "📢 Official Channel", "ru": "📢 Official Channel"},
     "language": {"ar": "اللغة", "en": "Language", "ru": "Язык"},
     "back": {"ar": "رجوع", "en": "Back", "ru": "Назад"},
     "main": {"ar": "القائمة الرئيسية", "en": "Main Menu", "ru": "Главное меню"},
@@ -372,15 +381,19 @@ def kb_lang():
 
 def kb_main(uid):
     l = lang(uid)
-    return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text=T["shop"][l], callback_data="shop")],
+    rows = [
+        [InlineKeyboardButton(text=T["shop"][l], web_app=WebAppInfo(url=WEB_APP_URL))],
         [InlineKeyboardButton(text=T["topup"][l], callback_data="topup"), InlineKeyboardButton(text=T["balance"][l], callback_data="balance")],
         [InlineKeyboardButton(text=T["cart"][l], callback_data="cart"), InlineKeyboardButton(text=T["favorites"][l], callback_data="favorites")],
         [InlineKeyboardButton(text=T["orders"][l], callback_data="orders"), InlineKeyboardButton(text=T["latest"][l], callback_data="latest")],
+        [InlineKeyboardButton(text=T["special_offers"][l], callback_data="special_offers"), InlineKeyboardButton(text=T["best_sellers"][l], callback_data="best_sellers")],
+        [InlineKeyboardButton(text=T["products"][l], callback_data="shop"), InlineKeyboardButton(text=T["profile"][l], callback_data="profile")],
         [InlineKeyboardButton(text=T["support"][l], callback_data="support"), InlineKeyboardButton(text=T["language"][l], callback_data="choose_lang")],
         [InlineKeyboardButton(text=T["faq"][l], callback_data="faq"), InlineKeyboardButton(text=T["referrals"][l], callback_data="referrals")],
-        [InlineKeyboardButton(text=T["channel"][l], url=CHANNEL_URL)],
-    ])
+        [InlineKeyboardButton(text=T["reviews"][l], callback_data="reviews"), InlineKeyboardButton(text=T["channel"][l], url=CHANNEL_URL)],
+        [InlineKeyboardButton(text=T["wholesale"][l], callback_data="wholesale"), InlineKeyboardButton(text=T["coupons"][l], callback_data="coupons")],
+    ]
+    return InlineKeyboardMarkup(inline_keyboard=rows)
 
 def kb_cats(uid):
     l = lang(uid)
@@ -427,6 +440,16 @@ async def notify_admins(text):
             await bot.send_message(aid, text)
         except Exception:
             pass
+
+async def send_welcome_message(m: Message):
+    photo_path = Path(WELCOME_PHOTO_PATH)
+    if photo_path.exists():
+        try:
+            await m.answer_photo(FSInputFile(photo_path), caption=txt(m.from_user.id, "welcome"), reply_markup=kb_main(m.from_user.id))
+            return
+        except Exception:
+            pass
+    await send_welcome_message(m)
 
 @dp.message(CommandStart())
 async def start(m: Message):
@@ -796,6 +819,86 @@ async def cb_latest(cq: CallbackQuery):
         for r in rows:
             text += f"Someone purchased {r['product']}\nAmount: {r['price']:.2f} USDT\nStatus: {r['status']}\n\n"
     await cq.message.edit_text(text, reply_markup=main_back_keyboard(cq.from_user.id))
+    await cq.answer()
+
+@dp.callback_query(F.data == "profile")
+async def cb_profile(cq: CallbackQuery):
+    u = user(cq.from_user.id)
+    invited, earnings = referral_stats(cq.from_user.id)
+    b = float(u["balance"]) if u else 0.0
+    text = (
+        "Profile\n\n"
+        f"ID: {cq.from_user.id}\n"
+        f"Username: @{cq.from_user.username}\n"
+        f"Balance: {b:.2f} USDT\n"
+        f"Invited users: {invited}\n"
+        f"Referral earnings: {earnings:.2f} USDT"
+    )
+    await cq.message.edit_text(text, reply_markup=main_back_keyboard(cq.from_user.id))
+    await cq.answer()
+
+@dp.callback_query(F.data == "special_offers")
+async def cb_special_offers(cq: CallbackQuery):
+    text = (
+        "Special Offers\n\n"
+        "HOT DEAL: Razer Gold and PUBG UC are available with trader prices.\n"
+        "Coupon: WELCOME5\n"
+        "For every 200 USDT deposit, contact support to receive a 5 USDT discount."
+    )
+    await cq.message.edit_text(text, reply_markup=main_back_keyboard(cq.from_user.id))
+    await cq.answer()
+
+@dp.callback_query(F.data == "best_sellers")
+async def cb_best_sellers(cq: CallbackQuery):
+    text = (
+        "Best Sellers\n\n"
+        "Razer Gold\n"
+        "PUBG UC\n"
+        "Steam USA\n"
+        "PlayStation USA\n"
+        "iTunes USA\n"
+        "Roblox Gift Cards"
+    )
+    await cq.message.edit_text(text, reply_markup=main_back_keyboard(cq.from_user.id))
+    await cq.answer()
+
+@dp.callback_query(F.data == "reviews")
+async def cb_reviews(cq: CallbackQuery):
+    text = (
+        "Customer Reviews\n\n"
+        "MD STORE is trusted by customers and resellers.\n"
+        "For proof, reviews, and deal history, contact support or check the official channel."
+    )
+    await cq.message.edit_text(text, reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text=SUPPORT_USERNAME, url=f"https://t.me/{SUPPORT_USERNAME.replace('@','')}")],
+        [InlineKeyboardButton(text=T["channel"][lang(cq.from_user.id)], url=CHANNEL_URL)],
+        [InlineKeyboardButton(text=T["back"][lang(cq.from_user.id)], callback_data="main")]
+    ]))
+    await cq.answer()
+
+@dp.callback_query(F.data == "coupons")
+async def cb_coupons(cq: CallbackQuery):
+    text = (
+        "Coupons\n\n"
+        "WELCOME5\n"
+        "Every 200 USDT deposit can receive a 5 USDT discount.\n\n"
+        "To apply a coupon, send:\n/coupon CODE"
+    )
+    await cq.message.edit_text(text, reply_markup=main_back_keyboard(cq.from_user.id))
+    await cq.answer()
+
+@dp.callback_query(F.data == "wholesale")
+async def cb_wholesale(cq: CallbackQuery):
+    text = (
+        "Wholesale Prices\n\n"
+        "MD STORE supplies digital cards and game top-ups for traders and resellers.\n"
+        "For large quantities and long-term cooperation, contact support.\n\n"
+        f"Minimum order: {get_min_order(cq.from_user.id):.0f} USDT"
+    )
+    await cq.message.edit_text(text, reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text=SUPPORT_USERNAME, url=f"https://t.me/{SUPPORT_USERNAME.replace('@','')}")],
+        [InlineKeyboardButton(text=T["back"][lang(cq.from_user.id)], callback_data="main")]
+    ]))
     await cq.answer()
 
 @dp.callback_query(F.data.startswith("cat:"))
