@@ -438,6 +438,24 @@ def main_back_keyboard(uid):
     l = lang(uid)
     return InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text=T["main"][l], callback_data="main")]])
 
+async def safe_edit(cq: CallbackQuery, text: str, reply_markup=None, **kwargs):
+    """Edit callback message safely. Works when the original message is a photo with caption."""
+    try:
+        await safe_edit(cq, text, reply_markup=reply_markup, **kwargs)
+        return
+    except Exception:
+        pass
+    try:
+        await cq.message.edit_caption(caption=text, reply_markup=reply_markup, **kwargs)
+        return
+    except Exception:
+        pass
+    try:
+        await cq.message.delete()
+    except Exception:
+        pass
+    await cq.message.answer(text, reply_markup=reply_markup, **kwargs)
+
 async def notify_admins(text):
     for aid in ADMIN_IDS:
         try:
@@ -675,28 +693,28 @@ async def cmd_coupon(m: Message):
 async def cb_lang(cq: CallbackQuery):
     ensure(cq.from_user)
     set_lang(cq.from_user.id, cq.data.split(":")[1])
-    await cq.message.edit_text(txt(cq.from_user.id, "welcome"), reply_markup=kb_main(cq.from_user.id))
+    await safe_edit(cq, txt(cq.from_user.id, "welcome"), reply_markup=kb_main(cq.from_user.id))
     await cq.answer()
 
 @dp.callback_query(F.data == "choose_lang")
 async def cb_choose_lang(cq: CallbackQuery):
-    await cq.message.edit_text(T["choose_lang"][lang(cq.from_user.id)], reply_markup=kb_lang())
+    await safe_edit(cq, T["choose_lang"][lang(cq.from_user.id)], reply_markup=kb_lang())
     await cq.answer()
 
 @dp.callback_query(F.data == "main")
 async def cb_main(cq: CallbackQuery):
-    await cq.message.edit_text(txt(cq.from_user.id, "welcome"), reply_markup=kb_main(cq.from_user.id))
+    await safe_edit(cq, txt(cq.from_user.id, "welcome"), reply_markup=kb_main(cq.from_user.id))
     await cq.answer()
 
 @dp.callback_query(F.data == "shop")
 async def cb_shop(cq: CallbackQuery):
-    await cq.message.edit_text(txt(cq.from_user.id, "category_text"), reply_markup=kb_cats(cq.from_user.id))
+    await safe_edit(cq, txt(cq.from_user.id, "category_text"), reply_markup=kb_cats(cq.from_user.id))
     await cq.answer()
 
 @dp.callback_query(F.data == "topup")
 async def cb_topup(cq: CallbackQuery):
     text = txt(cq.from_user.id, "pay", wallet=USDT_BEP20_ADDRESS, bybit=BYBIT_ID, support=SUPPORT_USERNAME)
-    await cq.message.edit_text(text, reply_markup=payment_keyboard(cq.from_user.id))
+    await safe_edit(cq, text, reply_markup=payment_keyboard(cq.from_user.id))
     await cq.answer()
 
 @dp.callback_query(F.data == "paid")
@@ -712,7 +730,7 @@ async def cb_paid(cq: CallbackQuery):
     await notify_admins(
         f"Payment Notice #{pid}\n\nUser ID: {cq.from_user.id}\nUsername: @{cq.from_user.username}\nStatus: Pending\n\nAsk the user for screenshot/hash if needed."
     )
-    await cq.message.edit_text(txt(cq.from_user.id, "paid_sent"), reply_markup=main_back_keyboard(cq.from_user.id))
+    await safe_edit(cq, txt(cq.from_user.id, "paid_sent"), reply_markup=main_back_keyboard(cq.from_user.id))
     await cq.answer()
 
 
@@ -765,7 +783,7 @@ async def cb_faq(cq: CallbackQuery):
             "Are codes instant?\n"
             "Yes, codes are delivered instantly and are valid for storage for a full year."
         )
-    await cq.message.edit_text(text, reply_markup=main_back_keyboard(cq.from_user.id))
+    await safe_edit(cq, text, reply_markup=main_back_keyboard(cq.from_user.id))
     await cq.answer()
 
 @dp.callback_query(F.data == "referrals")
@@ -781,7 +799,7 @@ async def cb_referrals(cq: CallbackQuery):
         f"Referral earnings: {earnings:.2f} USDT\n\n"
         f"Share your link. When your invited users buy, you receive referral balance."
     )
-    await cq.message.edit_text(text, reply_markup=main_back_keyboard(cq.from_user.id))
+    await safe_edit(cq, text, reply_markup=main_back_keyboard(cq.from_user.id))
     await cq.answer()
 
 @dp.callback_query(F.data == "balance")
@@ -793,7 +811,7 @@ async def cb_balance(cq: CallbackQuery):
     if code:
         text += f"\nCoupon: {code} ({discount:.0f}%)"
     text += "\n\n" + txt(cq.from_user.id, "coupon_help")
-    await cq.message.edit_text(text, reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+    await safe_edit(cq, text, reply_markup=InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text=T["topup"][lang(cq.from_user.id)], callback_data="topup")],
         [InlineKeyboardButton(text=T["back"][lang(cq.from_user.id)], callback_data="main")]
     ]))
@@ -802,7 +820,7 @@ async def cb_balance(cq: CallbackQuery):
 @dp.callback_query(F.data == "support")
 async def cb_support(cq: CallbackQuery):
     text = txt(cq.from_user.id, "pay", wallet=USDT_BEP20_ADDRESS, bybit=BYBIT_ID, support=SUPPORT_USERNAME)
-    await cq.message.edit_text(text, reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+    await safe_edit(cq, text, reply_markup=InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text=SUPPORT_USERNAME, url=f"https://t.me/{SUPPORT_USERNAME.replace('@','')}")],
         [InlineKeyboardButton(text=T["channel"][lang(cq.from_user.id)], url=CHANNEL_URL)],
         [InlineKeyboardButton(text=T["back"][lang(cq.from_user.id)], callback_data="main")]
@@ -819,7 +837,7 @@ async def cb_orders(cq: CallbackQuery):
         text = "My Orders\n\n"
         for r in rows:
             text += f"#{r['id']} | {r['product']}\nAmount: {r['price']:.2f} USDT\nStatus: {r['status']}\n\n"
-    await cq.message.edit_text(text, reply_markup=main_back_keyboard(cq.from_user.id))
+    await safe_edit(cq, text, reply_markup=main_back_keyboard(cq.from_user.id))
     await cq.answer()
 
 @dp.callback_query(F.data == "latest")
@@ -832,7 +850,7 @@ async def cb_latest(cq: CallbackQuery):
         text = "Latest Purchases\n\n"
         for r in rows:
             text += f"Someone purchased {r['product']}\nAmount: {r['price']:.2f} USDT\nStatus: {r['status']}\n\n"
-    await cq.message.edit_text(text, reply_markup=main_back_keyboard(cq.from_user.id))
+    await safe_edit(cq, text, reply_markup=main_back_keyboard(cq.from_user.id))
     await cq.answer()
 
 @dp.callback_query(F.data == "profile")
@@ -848,7 +866,7 @@ async def cb_profile(cq: CallbackQuery):
         f"Invited users: {invited}\n"
         f"Referral earnings: {earnings:.2f} USDT"
     )
-    await cq.message.edit_text(text, reply_markup=main_back_keyboard(cq.from_user.id))
+    await safe_edit(cq, text, reply_markup=main_back_keyboard(cq.from_user.id))
     await cq.answer()
 
 @dp.callback_query(F.data == "special_offers")
@@ -859,7 +877,7 @@ async def cb_special_offers(cq: CallbackQuery):
         "Coupon: WELCOME5\n"
         "For every 200 USDT deposit, contact support to receive a 5 USDT discount."
     )
-    await cq.message.edit_text(text, reply_markup=main_back_keyboard(cq.from_user.id))
+    await safe_edit(cq, text, reply_markup=main_back_keyboard(cq.from_user.id))
     await cq.answer()
 
 @dp.callback_query(F.data == "best_sellers")
@@ -873,7 +891,7 @@ async def cb_best_sellers(cq: CallbackQuery):
         "iTunes USA\n"
         "Roblox Gift Cards"
     )
-    await cq.message.edit_text(text, reply_markup=main_back_keyboard(cq.from_user.id))
+    await safe_edit(cq, text, reply_markup=main_back_keyboard(cq.from_user.id))
     await cq.answer()
 
 @dp.callback_query(F.data == "reviews")
@@ -882,7 +900,7 @@ async def cb_reviews(cq: CallbackQuery):
         "Customer Reviews\n\n"
         "Open the MD STORE Web App to view customer reviews, ratings, and proof of recent deals."
     )
-    await cq.message.edit_text(text, reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+    await safe_edit(cq, text, reply_markup=InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="Open Reviews", web_app=WebAppInfo(url=web_reviews_url()))],
         [InlineKeyboardButton(text=T["back"][lang(cq.from_user.id)], callback_data="main")]
     ]))
@@ -896,7 +914,7 @@ async def cb_coupons(cq: CallbackQuery):
         "Every 200 USDT deposit can receive a 5 USDT discount.\n\n"
         "To apply a coupon, send:\n/coupon CODE"
     )
-    await cq.message.edit_text(text, reply_markup=main_back_keyboard(cq.from_user.id))
+    await safe_edit(cq, text, reply_markup=main_back_keyboard(cq.from_user.id))
     await cq.answer()
 
 @dp.callback_query(F.data == "wholesale")
@@ -907,7 +925,7 @@ async def cb_wholesale(cq: CallbackQuery):
         "For large quantities and long-term cooperation, contact support.\n\n"
         f"Minimum order: {get_min_order(cq.from_user.id):.0f} USDT"
     )
-    await cq.message.edit_text(text, reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+    await safe_edit(cq, text, reply_markup=InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text=SUPPORT_USERNAME, url=f"https://t.me/{SUPPORT_USERNAME.replace('@','')}")],
         [InlineKeyboardButton(text=T["back"][lang(cq.from_user.id)], callback_data="main")]
     ]))
@@ -916,7 +934,7 @@ async def cb_wholesale(cq: CallbackQuery):
 @dp.callback_query(F.data.startswith("cat:"))
 async def cb_cat(cq: CallbackQuery):
     cat_key = cq.data.split(":")[1]
-    await cq.message.edit_text(cat_name(cat_key, lang(cq.from_user.id)), reply_markup=kb_items(cq.from_user.id, cat_key))
+    await safe_edit(cq, cat_name(cat_key, lang(cq.from_user.id)), reply_markup=kb_items(cq.from_user.id, cat_key))
     await cq.answer()
 
 @dp.callback_query(F.data.startswith("view:"))
@@ -927,7 +945,7 @@ async def cb_view(cq: CallbackQuery):
         return await cq.answer("Product not found", show_alert=True)
     l = lang(cq.from_user.id)
     text = f"{product_name(cat_key, item, l)}\n\nPrice: {price_text(item['price'])}\nValidity: 1 Year\nDelivery: Instant"
-    await cq.message.edit_text(text, reply_markup=kb_product_actions(cq.from_user.id, cat_key, pid))
+    await safe_edit(cq, text, reply_markup=kb_product_actions(cq.from_user.id, cat_key, pid))
     await cq.answer()
 
 @dp.callback_query(F.data.startswith("addcart:"))
@@ -964,14 +982,14 @@ async def cb_favorites(cq: CallbackQuery):
     with conn() as c:
         rows = c.execute("SELECT * FROM favorites WHERE user_id=? ORDER BY created_at DESC", (cq.from_user.id,)).fetchall()
     if not rows:
-        return await cq.message.edit_text(txt(cq.from_user.id, "empty_fav"), reply_markup=main_back_keyboard(cq.from_user.id))
+        return await safe_edit(cq, txt(cq.from_user.id, "empty_fav"), reply_markup=main_back_keyboard(cq.from_user.id))
     buttons = []
     for r in rows:
         item = get_item(r["cat_key"], r["product_id"])
         if item:
             buttons.append([InlineKeyboardButton(text=product_name(r["cat_key"], item, l), callback_data=f"view:{r['cat_key']}:{r['product_id']}")])
     buttons.append([InlineKeyboardButton(text=T["back"][l], callback_data="main")])
-    await cq.message.edit_text(T["favorites"][l], reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons))
+    await safe_edit(cq, T["favorites"][l], reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons))
     await cq.answer()
 
 @dp.callback_query(F.data == "cart")
@@ -980,7 +998,7 @@ async def cb_cart(cq: CallbackQuery):
     with conn() as c:
         rows = c.execute("SELECT * FROM cart WHERE user_id=? ORDER BY id DESC", (cq.from_user.id,)).fetchall()
     if not rows:
-        return await cq.message.edit_text(txt(cq.from_user.id, "empty_cart"), reply_markup=main_back_keyboard(cq.from_user.id))
+        return await safe_edit(cq, txt(cq.from_user.id, "empty_cart"), reply_markup=main_back_keyboard(cq.from_user.id))
     total = 0.0
     text = "Cart\n\n"
     for r in rows:
@@ -995,7 +1013,7 @@ async def cb_cart(cq: CallbackQuery):
     if code:
         text += f"\nCoupon: {code} - {percent:.0f}%\nTotal: {final:.2f} USDT"
     text += "\n\n" + txt(cq.from_user.id, "coupon_help")
-    await cq.message.edit_text(text, reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+    await safe_edit(cq, text, reply_markup=InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text=T["checkout"][l], callback_data="checkout")],
         [InlineKeyboardButton(text=T["clear_cart"][l], callback_data="clearcart")],
         [InlineKeyboardButton(text=T["back"][l], callback_data="main")]
@@ -1007,7 +1025,7 @@ async def cb_clearcart(cq: CallbackQuery):
     with conn() as c:
         c.execute("DELETE FROM cart WHERE user_id=?", (cq.from_user.id,))
         c.commit()
-    await cq.message.edit_text(txt(cq.from_user.id, "empty_cart"), reply_markup=main_back_keyboard(cq.from_user.id))
+    await safe_edit(cq, txt(cq.from_user.id, "empty_cart"), reply_markup=main_back_keyboard(cq.from_user.id))
     await cq.answer()
 
 async def create_order(cq: CallbackQuery, product: str, price: float, gift_to: str = ""):
@@ -1034,15 +1052,15 @@ async def cb_checkout(cq: CallbackQuery):
     l = lang(cq.from_user.id)
 
     if balance <= 0:
-        return await cq.message.edit_text(txt(cq.from_user.id, "need_balance"), reply_markup=main_back_keyboard(cq.from_user.id))
+        return await safe_edit(cq, txt(cq.from_user.id, "need_balance"), reply_markup=main_back_keyboard(cq.from_user.id))
     if balance < get_min_order(cq.from_user.id):
-        return await cq.message.edit_text(txt(cq.from_user.id, "min_order", min_order=get_min_order(cq.from_user.id)), reply_markup=main_back_keyboard(cq.from_user.id))
+        return await safe_edit(cq, txt(cq.from_user.id, "min_order", min_order=get_min_order(cq.from_user.id)), reply_markup=main_back_keyboard(cq.from_user.id))
 
     with conn() as c:
         rows = c.execute("SELECT * FROM cart WHERE user_id=? ORDER BY id", (cq.from_user.id,)).fetchall()
 
     if not rows:
-        return await cq.message.edit_text(txt(cq.from_user.id, "empty_cart"), reply_markup=main_back_keyboard(cq.from_user.id))
+        return await safe_edit(cq, txt(cq.from_user.id, "empty_cart"), reply_markup=main_back_keyboard(cq.from_user.id))
 
     total = 0.0
     names = []
@@ -1054,14 +1072,14 @@ async def cb_checkout(cq: CallbackQuery):
     final, code, percent = apply_discount(cq.from_user.id, total)
 
     if balance < final:
-        return await cq.message.edit_text(txt(cq.from_user.id, "need_balance"), reply_markup=main_back_keyboard(cq.from_user.id))
+        return await safe_edit(cq, txt(cq.from_user.id, "need_balance"), reply_markup=main_back_keyboard(cq.from_user.id))
 
     await create_order(cq, "Cart: " + ", ".join(names), final)
     with conn() as c:
         c.execute("DELETE FROM cart WHERE user_id=?", (cq.from_user.id,))
         c.commit()
 
-    await cq.message.edit_text(txt(cq.from_user.id, "order_done"), reply_markup=main_back_keyboard(cq.from_user.id))
+    await safe_edit(cq, txt(cq.from_user.id, "order_done"), reply_markup=main_back_keyboard(cq.from_user.id))
     await cq.answer()
 
 @dp.callback_query(F.data.startswith("buy:"))
@@ -1076,15 +1094,15 @@ async def cb_buy(cq: CallbackQuery):
     l = lang(cq.from_user.id)
 
     if b <= 0:
-        return await cq.message.edit_text(txt(cq.from_user.id, "need_balance"), reply_markup=main_back_keyboard(cq.from_user.id))
+        return await safe_edit(cq, txt(cq.from_user.id, "need_balance"), reply_markup=main_back_keyboard(cq.from_user.id))
     if b < get_min_order(cq.from_user.id):
-        return await cq.message.edit_text(txt(cq.from_user.id, "min_order", min_order=get_min_order(cq.from_user.id)), reply_markup=main_back_keyboard(cq.from_user.id))
+        return await safe_edit(cq, txt(cq.from_user.id, "min_order", min_order=get_min_order(cq.from_user.id)), reply_markup=main_back_keyboard(cq.from_user.id))
 
     price_val = float(item["price"] or 0.0)
     final, code, percent = apply_discount(cq.from_user.id, price_val)
 
     if b < final:
-        return await cq.message.edit_text(txt(cq.from_user.id, "need_balance"), reply_markup=main_back_keyboard(cq.from_user.id))
+        return await safe_edit(cq, txt(cq.from_user.id, "need_balance"), reply_markup=main_back_keyboard(cq.from_user.id))
 
     pname = product_name(cat_key, item, l)
     price_line = f"{final:.2f} USDT"
@@ -1092,7 +1110,7 @@ async def cb_buy(cq: CallbackQuery):
         price_line += f"\nCoupon: {code} - {percent:.0f}%"
 
     text = f"{T['confirm'][l]}\n\nProduct: {pname}\nPrice: {price_line}\nBalance: {b:.2f} USDT"
-    await cq.message.edit_text(text, reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+    await safe_edit(cq, text, reply_markup=InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text=T["confirm"][l], callback_data=f"confirm:{cat_key}:{pid}")],
         [InlineKeyboardButton(text=T["back"][l], callback_data=f"view:{cat_key}:{pid}")]
     ]))
@@ -1106,7 +1124,7 @@ async def cb_gift(cq: CallbackQuery):
         return await cq.answer("Product not found", show_alert=True)
     l = lang(cq.from_user.id)
     pname = product_name(cat_key, item, l)
-    await cq.message.edit_text(
+    await safe_edit(cq, 
         f"{T['gift'][l]}\n\n{pname}\n\nTo send this as a gift, confirm the purchase then send the recipient details to support.",
         reply_markup=InlineKeyboardMarkup(inline_keyboard=[
             [InlineKeyboardButton(text=T["confirm"][l], callback_data=f"confirmgift:{cat_key}:{pid}")],
@@ -1124,16 +1142,16 @@ async def cb_confirm_gift(cq: CallbackQuery):
     u = user(cq.from_user.id)
     b = float(u["balance"]) if u else 0.0
     if b <= 0:
-        return await cq.message.edit_text(txt(cq.from_user.id, "need_balance"), reply_markup=main_back_keyboard(cq.from_user.id))
+        return await safe_edit(cq, txt(cq.from_user.id, "need_balance"), reply_markup=main_back_keyboard(cq.from_user.id))
     if b < get_min_order(cq.from_user.id):
-        return await cq.message.edit_text(txt(cq.from_user.id, "min_order", min_order=get_min_order(cq.from_user.id)), reply_markup=main_back_keyboard(cq.from_user.id))
+        return await safe_edit(cq, txt(cq.from_user.id, "min_order", min_order=get_min_order(cq.from_user.id)), reply_markup=main_back_keyboard(cq.from_user.id))
     price_val = float(item["price"] or 0.0)
     final, code, percent = apply_discount(cq.from_user.id, price_val)
     if b < final:
-        return await cq.message.edit_text(txt(cq.from_user.id, "need_balance"), reply_markup=main_back_keyboard(cq.from_user.id))
+        return await safe_edit(cq, txt(cq.from_user.id, "need_balance"), reply_markup=main_back_keyboard(cq.from_user.id))
     pname = product_name(cat_key, item, lang(cq.from_user.id))
     await create_order(cq, pname, final, gift_to="Recipient details will be sent to support")
-    await cq.message.edit_text(txt(cq.from_user.id, "order_done"), reply_markup=main_back_keyboard(cq.from_user.id))
+    await safe_edit(cq, txt(cq.from_user.id, "order_done"), reply_markup=main_back_keyboard(cq.from_user.id))
     await cq.answer()
 
 @dp.callback_query(F.data.startswith("confirm:"))
@@ -1147,7 +1165,7 @@ async def cb_confirm(cq: CallbackQuery):
     b = float(u["balance"]) if u else 0.0
 
     if b <= 0:
-        return await cq.message.edit_text(txt(cq.from_user.id, "need_balance"), reply_markup=main_back_keyboard(cq.from_user.id))
+        return await safe_edit(cq, txt(cq.from_user.id, "need_balance"), reply_markup=main_back_keyboard(cq.from_user.id))
     if b < get_min_order(cq.from_user.id):
         return await cq.answer(f"Minimum order is {get_min_order(cq.from_user.id):.0f} USDT", show_alert=True)
 
@@ -1159,7 +1177,7 @@ async def cb_confirm(cq: CallbackQuery):
 
     pname = product_name(cat_key, item, lang(cq.from_user.id))
     await create_order(cq, pname, final)
-    await cq.message.edit_text(txt(cq.from_user.id, "order_done"), reply_markup=main_back_keyboard(cq.from_user.id))
+    await safe_edit(cq, txt(cq.from_user.id, "order_done"), reply_markup=main_back_keyboard(cq.from_user.id))
     await cq.answer()
 
 @dp.message()
