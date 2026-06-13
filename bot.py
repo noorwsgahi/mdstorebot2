@@ -14,6 +14,8 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
+BASE_DIR = Path(__file__).resolve().parent
+
 BOT_TOKEN = os.getenv("BOT_TOKEN", "").strip()
 BOT_NAME = os.getenv("BOT_NAME", "MD STORE Global")
 SUPPORT_USERNAME = os.getenv("SUPPORT_USERNAME", "@bot_MD_global")
@@ -58,8 +60,8 @@ T = {
     },
     "shop": {"ar": "🛍 Shop", "en": "🛍 Shop", "ru": "🛍 Shop"},
     "products": {"ar": "Products", "en": "Products", "ru": "Products"},
-    "special_offers": {"ar": "🎁 Special Offers", "en": "🎁 Special Offers", "ru": "🎁 Special Offers"},
-    "best_sellers": {"ar": "⭐ Best Sellers", "en": "⭐ Best Sellers", "ru": "⭐ Best Sellers"},
+    "special_offers": {"ar": "Special Offers", "en": "Special Offers", "ru": "Special Offers"},
+    "best_sellers": {"ar": "Best Sellers", "en": "Best Sellers", "ru": "Best Sellers"},
     "reviews": {"ar": "Reviews", "en": "Reviews", "ru": "Reviews"},
     "profile": {"ar": "Profile", "en": "Profile", "ru": "Profile"},
     "coupons": {"ar": "Coupons", "en": "Coupons", "ru": "Coupons"},
@@ -68,13 +70,13 @@ T = {
     "balance": {"ar": "الرصيد", "en": "Balance", "ru": "Баланс"},
     "cart": {"ar": "السلة", "en": "Cart", "ru": "Корзина"},
     "favorites": {"ar": "المفضلة", "en": "Favorites", "ru": "Избранное"},
-    "orders": {"ar": "📦 My Orders", "en": "📦 My Orders", "ru": "📦 My Orders"},
+    "orders": {"ar": "My Orders", "en": "My Orders", "ru": "My Orders"},
     "latest": {"ar": "آخر عمليات الشراء", "en": "Latest Purchases", "ru": "Последние покупки"},
     "support": {"ar": "الدعم", "en": "Support", "ru": "Поддержка"},
     "faq": {"ar": "الأسئلة الشائعة", "en": "FAQ", "ru": "FAQ"},
     "referrals": {"ar": "الإحالات", "en": "Referrals", "ru": "Рефералы"},
     "copy_usdt": {"ar": "نسخ عنوان USDT", "en": "Copy USDT Address", "ru": "Скопировать USDT"},
-    "channel": {"ar": "📢 Official Channel", "en": "📢 Official Channel", "ru": "📢 Official Channel"},
+    "channel": {"ar": "Official Channel", "en": "Official Channel", "ru": "Official Channel"},
     "language": {"ar": "اللغة", "en": "Language", "ru": "Язык"},
     "back": {"ar": "رجوع", "en": "Back", "ru": "Назад"},
     "main": {"ar": "القائمة الرئيسية", "en": "Main Menu", "ru": "Главное меню"},
@@ -379,19 +381,23 @@ def kb_lang():
         for k, v in LANGS.items()
     ])
 
+def web_reviews_url():
+    base = WEB_APP_URL.rstrip("/")
+    return f"{base}/#reviews"
+
 def kb_main(uid):
     l = lang(uid)
     rows = [
         [InlineKeyboardButton(text=T["shop"][l], web_app=WebAppInfo(url=WEB_APP_URL))],
+        [InlineKeyboardButton(text=T["products"][l], callback_data="shop")],
         [InlineKeyboardButton(text=T["topup"][l], callback_data="topup"), InlineKeyboardButton(text=T["balance"][l], callback_data="balance")],
         [InlineKeyboardButton(text=T["cart"][l], callback_data="cart"), InlineKeyboardButton(text=T["favorites"][l], callback_data="favorites")],
         [InlineKeyboardButton(text=T["orders"][l], callback_data="orders"), InlineKeyboardButton(text=T["latest"][l], callback_data="latest")],
         [InlineKeyboardButton(text=T["special_offers"][l], callback_data="special_offers"), InlineKeyboardButton(text=T["best_sellers"][l], callback_data="best_sellers")],
-        [InlineKeyboardButton(text=T["products"][l], callback_data="shop"), InlineKeyboardButton(text=T["profile"][l], callback_data="profile")],
-        [InlineKeyboardButton(text=T["support"][l], callback_data="support"), InlineKeyboardButton(text=T["language"][l], callback_data="choose_lang")],
-        [InlineKeyboardButton(text=T["faq"][l], callback_data="faq"), InlineKeyboardButton(text=T["referrals"][l], callback_data="referrals")],
-        [InlineKeyboardButton(text=T["reviews"][l], callback_data="reviews"), InlineKeyboardButton(text=T["channel"][l], url=CHANNEL_URL)],
-        [InlineKeyboardButton(text=T["wholesale"][l], callback_data="wholesale"), InlineKeyboardButton(text=T["coupons"][l], callback_data="coupons")],
+        [InlineKeyboardButton(text=T["profile"][l], callback_data="profile"), InlineKeyboardButton(text=T["language"][l], callback_data="choose_lang")],
+        [InlineKeyboardButton(text=T["support"][l], callback_data="support"), InlineKeyboardButton(text=T["faq"][l], callback_data="faq")],
+        [InlineKeyboardButton(text=T["referrals"][l], callback_data="referrals"), InlineKeyboardButton(text=T["coupons"][l], callback_data="coupons")],
+        [InlineKeyboardButton(text=T["reviews"][l], web_app=WebAppInfo(url=web_reviews_url())), InlineKeyboardButton(text=T["channel"][l], url=CHANNEL_URL)],
     ]
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
@@ -442,14 +448,23 @@ async def notify_admins(text):
             pass
 
 async def send_welcome_message(m: Message):
-    photo_path = Path(WELCOME_PHOTO_PATH)
-    if photo_path.exists():
-        try:
-            await m.answer_photo(FSInputFile(photo_path), caption=txt(m.from_user.id, "welcome"), reply_markup=kb_main(m.from_user.id))
-            return
-        except Exception:
-            pass
-    await send_welcome_message(m)
+    photo_candidates = [
+        Path(WELCOME_PHOTO_PATH),
+        BASE_DIR / WELCOME_PHOTO_PATH,
+        BASE_DIR / "md_store_welcome.jpg",
+    ]
+    for photo_path in photo_candidates:
+        if photo_path.exists():
+            try:
+                await m.answer_photo(
+                    FSInputFile(photo_path),
+                    caption=txt(m.from_user.id, "welcome"),
+                    reply_markup=kb_main(m.from_user.id),
+                )
+                return
+            except Exception:
+                continue
+    await m.answer(txt(m.from_user.id, "welcome"), reply_markup=kb_main(m.from_user.id))
 
 @dp.message(CommandStart())
 async def start(m: Message):
@@ -474,7 +489,7 @@ async def start(m: Message):
         except Exception:
             pass
 
-    await m.answer(txt(m.from_user.id, "welcome"), reply_markup=kb_main(m.from_user.id))
+    await send_welcome_message(m)
 
 @dp.message(Command("language"))
 async def cmd_language(m: Message):
@@ -866,12 +881,10 @@ async def cb_best_sellers(cq: CallbackQuery):
 async def cb_reviews(cq: CallbackQuery):
     text = (
         "Customer Reviews\n\n"
-        "MD STORE is trusted by customers and resellers.\n"
-        "For proof, reviews, and deal history, contact support or check the official channel."
+        "Open the MD STORE Web App to view customer reviews, ratings, and proof of recent deals."
     )
     await cq.message.edit_text(text, reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text=SUPPORT_USERNAME, url=f"https://t.me/{SUPPORT_USERNAME.replace('@','')}")],
-        [InlineKeyboardButton(text=T["channel"][lang(cq.from_user.id)], url=CHANNEL_URL)],
+        [InlineKeyboardButton(text="Open Reviews", web_app=WebAppInfo(url=web_reviews_url()))],
         [InlineKeyboardButton(text=T["back"][lang(cq.from_user.id)], callback_data="main")]
     ]))
     await cq.answer()
