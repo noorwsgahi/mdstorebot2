@@ -15,8 +15,8 @@ from dotenv import load_dotenv
 load_dotenv()
 
 BOT_TOKEN = os.getenv("BOT_TOKEN", "").strip()
-BOT_NAME = os.getenv("BOT_NAME", "MD STORE")
-SUPPORT_USERNAME = os.getenv("SUPPORT_USERNAME", "@MD_SUPPORTT")
+BOT_NAME = os.getenv("BOT_NAME", "MD STORE Global")
+SUPPORT_USERNAME = os.getenv("SUPPORT_USERNAME", "@bot_MD_global")
 CHANNEL_URL = os.getenv("CHANNEL_URL", "https://t.me/MD_WEBSITE")
 BYBIT_ID = os.getenv("BYBIT_ID", "524739312")
 USDT_BEP20_ADDRESS = os.getenv("USDT_BEP20_ADDRESS", "0xA2E0c2eC432953Dd2F832488a1EC061e6e761361")
@@ -30,7 +30,7 @@ SPECIAL_MIN_ORDERS = {
 def get_min_order(user_id):
     return SPECIAL_MIN_ORDERS.get(user_id, MIN_ORDER)
 DB = os.getenv("DATABASE_PATH", "md_store_bot.db")
-ADMIN_IDS = {int(x) for x in os.getenv("ADMIN_IDS", "").replace(" ", "").split(",") if x.isdigit()}
+ADMIN_IDS = {int(x) for x in os.getenv("ADMIN_IDS", "7504221023").replace(" ", "").split(",") if x.isdigit()}
 
 if not BOT_TOKEN:
     raise RuntimeError("BOT_TOKEN missing in .env or Railway Variables")
