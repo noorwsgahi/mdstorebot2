@@ -47,6 +47,28 @@ dp = Dispatcher()
 
 LANGS = {"ar": "العربية", "en": "English", "ru": "Русский"}
 
+# Custom emoji IDs used in Telegram colored buttons.
+# These IDs were provided from Telegram RawDataBot/custom emoji entities.
+CUSTOM_EMOJI = {
+    "shop": "5309801015015405183",
+    "topup": "5310177404474390190",
+    "balance": "5276137490846075469",
+    "cart_orders": "5443143274061642333",
+    "profile": "5242442819573927209",
+    "support": "5440411975509096877",
+    "channel": "5364125616801073577",
+    "razer": "5262644026451960385",
+    "pubg_uc": "5314544952422704045",
+    "steam": "5318801707394695066",
+    "playstation": "5363934885893389858",
+    "roblox": "5388921730016240894",
+    "itunes": "5332512686112520612",
+}
+
+# Hide products that should no longer appear in the bot.
+# iTunes Gift Cards remain available; only iTunes Accounts are hidden.
+HIDDEN_PRODUCT_KEYWORDS = ("yalla", "ludo", "itunes account", "itunes accounts")
+
 T = {
     "choose_lang": {
         "ar": "اختر اللغة:",
@@ -58,25 +80,25 @@ T = {
         "en": "Welcome to MD STORE\nDigital gift card marketplace.\n\nMD STORE supplies digital cards and game top-ups for traders and resellers.\nFor large quantities and long-term cooperation, contact support.\n\nChoose from the menu:",
         "ru": "Добро пожаловать в MD STORE\nМаркетплейс цифровых подарочных карт.\n\nMD STORE поставляет цифровые карты и пополнения игр для клиентов и реселлеров.\nДля крупных заказов и долгосрочного сотрудничества свяжитесь с поддержкой.\n\nВыберите пункт меню:",
     },
-    "shop": {"ar": "🛍 المتجر", "en": "🛍 Shop", "ru": "🛍 Магазин"},
-    "products": {"ar": "المنتجات", "en": "Products", "ru": "Товары"},
+    "shop": {"ar": "SHOP", "en": "SHOP", "ru": "SHOP"},
+    "products": {"ar": "SHOP", "en": "SHOP", "ru": "SHOP"},
     "special_offers": {"ar": "🎁 العروض", "en": "🎁 Special Offers", "ru": "🎁 Акции"},
     "best_sellers": {"ar": "⭐ الاكثر مبيعا", "en": "⭐ Best Sellers", "ru": "⭐ Хиты продаж"},
-    "reviews": {"ar": "📝 المراجعات", "en": "📝 Reviews", "ru": "📝 Отзывы"},
-    "profile": {"ar": "👤 الحساب", "en": "👤 Profile", "ru": "👤 Профиль"},
+    "reviews": {"ar": "المراجعات", "en": "Reviews", "ru": "Отзывы"},
+    "profile": {"ar": "الحساب", "en": "Profile", "ru": "Профиль"},
     "coupons": {"ar": "Coupons", "en": "Coupons", "ru": "Coupons"},
     "wholesale": {"ar": "Wholesale Prices", "en": "Wholesale Prices", "ru": "Wholesale Prices"},
     "topup": {"ar": "شحن الرصيد", "en": "Top Up Balance", "ru": "Пополнить баланс"},
-    "balance": {"ar": "💰 الرصيد", "en": "💰 Balance", "ru": "💰 Баланс"},
-    "cart": {"ar": "🛒 السلة", "en": "🛒 Cart", "ru": "🛒 Корзина"},
+    "balance": {"ar": "الرصيد", "en": "Balance", "ru": "Баланс"},
+    "cart": {"ar": "السلة", "en": "Cart", "ru": "Корзина"},
     "favorites": {"ar": "❤️ المفضلة", "en": "❤️ Favorites", "ru": "❤️ Избранное"},
-    "orders": {"ar": "📦 طلباتي", "en": "📦 My Orders", "ru": "📦 Мои заказы"},
+    "orders": {"ar": "طلباتي", "en": "My Orders", "ru": "Мои заказы"},
     "latest": {"ar": "آخر عمليات الشراء", "en": "Latest Purchases", "ru": "Последние покупки"},
-    "support": {"ar": "💬 الدعم", "en": "💬 Support", "ru": "💬 Поддержка"},
+    "support": {"ar": "الدعم", "en": "Support", "ru": "Поддержка"},
     "faq": {"ar": "الأسئلة الشائعة", "en": "FAQ", "ru": "FAQ"},
     "referrals": {"ar": "👥 الاحالات", "en": "👥 Referrals", "ru": "👥 Рефералы"},
     "copy_usdt": {"ar": "نسخ عنوان USDT", "en": "Copy USDT Address", "ru": "Скопировать USDT"},
-    "channel": {"ar": "📢 القناة الرسمية", "en": "📢 Official Channel", "ru": "📢 Официальный канал"},
+    "channel": {"ar": "القناة الرسمية", "en": "Official Channel", "ru": "Официальный канал"},
     "language": {"ar": "🌍 اللغة", "en": "🌍 Language", "ru": "🌍 Язык"},
     "back": {"ar": "رجوع", "en": "Back", "ru": "Назад"},
     "main": {"ar": "القائمة الرئيسية", "en": "Main Menu", "ru": "Главное меню"},
@@ -296,6 +318,29 @@ def cat_name(cat_key, l):
     cat = PRODUCTS.get(cat_key, {})
     return cat.get(l, cat.get("en", cat_key))
 
+def is_hidden_category(cat_key: str, cat: Dict[str, Any]) -> bool:
+    names = " ".join(str(cat.get(k, "")) for k in ("ar", "en", "ru"))
+    haystack = f"{cat_key} {names}".lower()
+    return any(word in haystack for word in HIDDEN_PRODUCT_KEYWORDS)
+
+def category_custom_emoji_id(cat_key: str, cat: Optional[Dict[str, Any]] = None) -> Optional[str]:
+    cat = cat or PRODUCTS.get(cat_key, {})
+    names = " ".join(str(cat.get(k, "")) for k in ("ar", "en", "ru"))
+    haystack = f"{cat_key} {names}".lower()
+    if "razer" in haystack:
+        return CUSTOM_EMOJI["razer"]
+    if "pubg" in haystack or " uc" in f" {haystack}" or "uc " in haystack:
+        return CUSTOM_EMOJI["pubg_uc"]
+    if "steam" in haystack:
+        return CUSTOM_EMOJI["steam"]
+    if "playstation" in haystack or "play station" in haystack or "psn" in haystack:
+        return CUSTOM_EMOJI["playstation"]
+    if "roblox" in haystack:
+        return CUSTOM_EMOJI["roblox"]
+    if "itunes" in haystack or "apple" in haystack:
+        return CUSTOM_EMOJI["itunes"]
+    return None
+
 def product_name(cat_key, item, l):
     return f"{cat_name(cat_key, l)} {item['label']}"
 
@@ -400,14 +445,19 @@ def web_reviews_url():
 def kb_main(uid):
     l = lang(uid)
     rows = [
-        [styled_button(text=T["shop"][l], web_app=WebAppInfo(url=WEB_APP_URL), style="primary")],
-        [styled_button(text=T["products"][l], callback_data="shop", style="primary")],
-        [styled_button(text=T["special_offers"][l], callback_data="special_offers", style="danger"), styled_button(text=T["best_sellers"][l], callback_data="best_sellers", style="danger")],
-        [styled_button(text=T["orders"][l], callback_data="orders", style="primary"), styled_button(text=T["balance"][l], callback_data="balance", style="primary")],
-        [styled_button(text=T["cart"][l], callback_data="cart", style="primary"), styled_button(text=T["favorites"][l], callback_data="favorites", style="primary")],
-        [styled_button(text=T["profile"][l], callback_data="profile", style="primary"), styled_button(text=T["language"][l], callback_data="choose_lang", style="primary")],
-        [styled_button(text=T["referrals"][l], callback_data="referrals", style="danger"), styled_button(text=T["reviews"][l], web_app=WebAppInfo(url=web_reviews_url()), style="success")],
-        [styled_button(text=T["support"][l], callback_data="support", style="success"), styled_button(text=T["channel"][l], url=CHANNEL_URL, style="primary")],
+        [styled_button(text=T["products"][l], callback_data="shop", style="primary", icon_custom_emoji_id=CUSTOM_EMOJI["shop"])],
+        [styled_button(text=T["topup"][l], callback_data="topup", style="primary", icon_custom_emoji_id=CUSTOM_EMOJI["topup"]),
+         styled_button(text=T["balance"][l], callback_data="balance", style="primary", icon_custom_emoji_id=CUSTOM_EMOJI["balance"])],
+        [styled_button(text=T["orders"][l], callback_data="orders", style="primary", icon_custom_emoji_id=CUSTOM_EMOJI["cart_orders"]),
+         styled_button(text=T["cart"][l], callback_data="cart", style="primary", icon_custom_emoji_id=CUSTOM_EMOJI["cart_orders"])],
+        [styled_button(text=T["special_offers"][l], callback_data="special_offers", style="danger"),
+         styled_button(text=T["best_sellers"][l], callback_data="best_sellers", style="danger")],
+        [styled_button(text=T["favorites"][l], callback_data="favorites", style="primary"),
+         styled_button(text=T["profile"][l], callback_data="profile", style="primary", icon_custom_emoji_id=CUSTOM_EMOJI["profile"])],
+        [styled_button(text=T["referrals"][l], callback_data="referrals", style="danger"),
+         styled_button(text=T["language"][l], callback_data="choose_lang", style="primary")],
+        [styled_button(text=T["support"][l], callback_data="support", style="success", icon_custom_emoji_id=CUSTOM_EMOJI["support"]),
+         styled_button(text=T["channel"][l], url=CHANNEL_URL, style="primary", icon_custom_emoji_id=CUSTOM_EMOJI["channel"])],
     ]
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
@@ -415,7 +465,14 @@ def kb_cats(uid):
     l = lang(uid)
     rows = []
     for k, v in PRODUCTS.items():
-        rows.append([styled_button(text=v.get(l, v.get("en", k)), callback_data=f"cat:{k}", style="primary")])
+        if is_hidden_category(k, v):
+            continue
+        rows.append([styled_button(
+            text=v.get(l, v.get("en", k)),
+            callback_data=f"cat:{k}",
+            style="primary",
+            icon_custom_emoji_id=category_custom_emoji_id(k, v),
+        )])
     rows.append([styled_button(text=T["back"][l], callback_data="main", style="danger")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
@@ -440,9 +497,9 @@ def kb_product_actions(uid, cat_key, pid):
 def payment_keyboard(uid):
     l = lang(uid)
     return InlineKeyboardMarkup(inline_keyboard=[
-        [styled_button(text=T["copy_usdt"][l], callback_data="copy_usdt", style="primary")],
-        [styled_button(text=T["i_paid"][l], callback_data="paid", style="success")],
-        [styled_button(text=SUPPORT_USERNAME, url=f"https://t.me/{SUPPORT_USERNAME.replace('@','')}", style="success")],
+        [styled_button(text=T["copy_usdt"][l], callback_data="copy_usdt", style="primary", icon_custom_emoji_id=CUSTOM_EMOJI["topup"])],
+        [styled_button(text=T["i_paid"][l], callback_data="paid", style="success", icon_custom_emoji_id=CUSTOM_EMOJI["topup"])],
+        [styled_button(text=SUPPORT_USERNAME, url=f"https://t.me/{SUPPORT_USERNAME.replace('@','')}", style="success", icon_custom_emoji_id=CUSTOM_EMOJI["support"])],
         [styled_button(text=T["back"][l], callback_data="main", style="danger")],
     ])
 
@@ -821,7 +878,7 @@ async def cb_balance(cq: CallbackQuery):
         text += f"\nCoupon: {code} ({discount:.0f}%)"
     text += "\n\n" + txt(cq.from_user.id, "coupon_help")
     await safe_edit(cq, text, reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-        [styled_button(text=T["topup"][lang(cq.from_user.id)], callback_data="topup", style="primary")],
+        [styled_button(text=T["topup"][lang(cq.from_user.id)], callback_data="topup", style="primary", icon_custom_emoji_id=CUSTOM_EMOJI["topup"])],
         [styled_button(text=T["back"][lang(cq.from_user.id)], callback_data="main", style="danger")]
     ]))
     await cq.answer()
@@ -830,8 +887,8 @@ async def cb_balance(cq: CallbackQuery):
 async def cb_support(cq: CallbackQuery):
     text = txt(cq.from_user.id, "pay", wallet=USDT_BEP20_ADDRESS, bybit=BYBIT_ID, support=SUPPORT_USERNAME)
     await safe_edit(cq, text, reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-        [styled_button(text=SUPPORT_USERNAME, url=f"https://t.me/{SUPPORT_USERNAME.replace('@','')}", style="success")],
-        [styled_button(text=T["channel"][lang(cq.from_user.id)], url=CHANNEL_URL, style="primary")],
+        [styled_button(text=SUPPORT_USERNAME, url=f"https://t.me/{SUPPORT_USERNAME.replace('@','')}", style="success", icon_custom_emoji_id=CUSTOM_EMOJI["support"])],
+        [styled_button(text=T["channel"][lang(cq.from_user.id)], url=CHANNEL_URL, style="primary", icon_custom_emoji_id=CUSTOM_EMOJI["channel"])],
         [styled_button(text=T["back"][lang(cq.from_user.id)], callback_data="main", style="danger")]
     ]))
     await cq.answer()
@@ -935,7 +992,7 @@ async def cb_wholesale(cq: CallbackQuery):
         f"Minimum order: {get_min_order(cq.from_user.id):.0f} USDT"
     )
     await safe_edit(cq, text, reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-        [styled_button(text=SUPPORT_USERNAME, url=f"https://t.me/{SUPPORT_USERNAME.replace('@','')}", style="success")],
+        [styled_button(text=SUPPORT_USERNAME, url=f"https://t.me/{SUPPORT_USERNAME.replace('@','')}", style="success", icon_custom_emoji_id=CUSTOM_EMOJI["support"])],
         [styled_button(text=T["back"][lang(cq.from_user.id)], callback_data="main", style="danger")]
     ]))
     await cq.answer()
@@ -943,6 +1000,10 @@ async def cb_wholesale(cq: CallbackQuery):
 @dp.callback_query(F.data.startswith("cat:"))
 async def cb_cat(cq: CallbackQuery):
     cat_key = cq.data.split(":")[1]
+    cat = PRODUCTS.get(cat_key, {})
+    if is_hidden_category(cat_key, cat):
+        await cq.answer("Product is unavailable", show_alert=True)
+        return
     await safe_edit(cq, cat_name(cat_key, lang(cq.from_user.id)), reply_markup=kb_items(cq.from_user.id, cat_key))
     await cq.answer()
 
