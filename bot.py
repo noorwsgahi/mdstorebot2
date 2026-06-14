@@ -26,13 +26,6 @@ BYBIT_ID = os.getenv("BYBIT_ID", "524739312")
 USDT_BEP20_ADDRESS = os.getenv("USDT_BEP20_ADDRESS", "0xA2E0c2eC432953Dd2F832488a1EC061e6e761361")
 MIN_ORDER = float(os.getenv("MIN_ORDER_USDT", "50"))
 
-SPECIAL_MIN_ORDERS = {
-    7781514279: 100.0,
-    358930912: 100.0,
-}
-
-def get_min_order(user_id):
-    return SPECIAL_MIN_ORDERS.get(user_id, MIN_ORDER)
 DB = os.getenv("DATABASE_PATH", "md_store_bot.db")
 ADMIN_IDS = {int(x) for x in os.getenv("ADMIN_IDS", "7504221023").replace(" ", "").split(",") if x.isdigit()}
 
@@ -240,6 +233,20 @@ def init_db():
         if "created_at" not in order_cols:
             c.execute("ALTER TABLE orders ADD COLUMN created_at TEXT")
 
+        c.execute("""CREATE TABLE IF NOT EXISTS user_min_orders(
+            user_id INTEGER PRIMARY KEY,
+            min_order REAL NOT NULL,
+            created_at TEXT
+        )""")
+        c.execute("""CREATE TABLE IF NOT EXISTS banned_users(
+            user_id INTEGER PRIMARY KEY,
+            reason TEXT DEFAULT '',
+            created_at TEXT
+        )""")
+        c.execute(
+            "INSERT OR REPLACE INTO user_min_orders(user_id, min_order, created_at) VALUES(?,?,?)",
+            (7106605623, 250.0, datetime.utcnow().isoformat())
+        )
         c.commit()
 
 def ensure(u, referrer_id: int = 0):
@@ -273,6 +280,27 @@ def txt(uid, key, **kw):
 
 def admin(uid):
     return uid in ADMIN_IDS
+
+
+def get_min_order(user_id):
+    with conn() as c:
+        row = c.execute("SELECT min_order FROM user_min_orders WHERE user_id=?", (user_id,)).fetchone()
+    return float(row["min_order"]) if row else MIN_ORDER
+
+def is_banned(user_id):
+    with conn() as c:
+        row = c.execute("SELECT user_id FROM banned_users WHERE user_id=?", (user_id,)).fetchone()
+    return row is not None
+
+async def block_if_banned(obj):
+    uid = obj.from_user.id
+    if is_banned(uid):
+        if isinstance(obj, Message):
+            await obj.answer("Your account has been blocked. Please contact support.")
+        else:
+            await obj.answer("Your account has been blocked.", show_alert=True)
+        return True
+    return False
 
 def set_lang(uid, l):
     with conn() as c:
@@ -594,7 +622,7 @@ async def admin_panel(m: Message):
         "/broadcast MESSAGE\n"
         "/addcoupon CODE PERCENT\n"
         "/delcoupon CODE\n"
-        "/coupons\n"
+        "/coupons\n/ban USER_ID\n/unban USER_ID\n/setmin USER_ID AMOUNT\n/resetmin USER_ID\n"
         "/discount24"
     )
 
@@ -755,8 +783,68 @@ async def cmd_coupon(m: Message):
         c.commit()
     await m.answer(txt(m.from_user.id, "coupon_ok"))
 
+
+@dp.message(Command("ban"))
+async def cmd_ban(m: Message):
+    if not admin(m.from_user.id):
+        return await m.answer(T["admin_only"]["en"])
+    p = m.text.split(maxsplit=2)
+    if len(p) < 2 or not p[1].isdigit():
+        return await m.answer("Usage: /ban USER_ID")
+    uid = int(p[1])
+    reason = p[2] if len(p) > 2 else ""
+    with conn() as c:
+        c.execute("INSERT OR REPLACE INTO banned_users(user_id, reason, created_at) VALUES(?,?,?)", (uid, reason, datetime.utcnow().isoformat()))
+        c.commit()
+    await m.answer(f"User banned.\nUser ID: {uid}")
+
+@dp.message(Command("unban"))
+async def cmd_unban(m: Message):
+    if not admin(m.from_user.id):
+        return await m.answer(T["admin_only"]["en"])
+    p = m.text.split()
+    if len(p) != 2 or not p[1].isdigit():
+        return await m.answer("Usage: /unban USER_ID")
+    uid = int(p[1])
+    with conn() as c:
+        c.execute("DELETE FROM banned_users WHERE user_id=?", (uid,))
+        c.commit()
+    await m.answer(f"User unbanned.\nUser ID: {uid}")
+
+@dp.message(Command("setmin"))
+async def cmd_setmin(m: Message):
+    if not admin(m.from_user.id):
+        return await m.answer(T["admin_only"]["en"])
+    p = m.text.split()
+    if len(p) != 3 or not p[1].isdigit():
+        return await m.answer("Usage: /setmin USER_ID AMOUNT")
+    try:
+        uid = int(p[1])
+        amount = float(p[2])
+        with conn() as c:
+            c.execute("INSERT OR REPLACE INTO user_min_orders(user_id, min_order, created_at) VALUES(?,?,?)", (uid, amount, datetime.utcnow().isoformat()))
+            c.commit()
+        await m.answer(f"Custom minimum order saved.\nUser ID: {uid}\nMinimum: {amount:.2f} USDT")
+    except Exception:
+        await m.answer("Invalid input")
+
+@dp.message(Command("resetmin"))
+async def cmd_resetmin(m: Message):
+    if not admin(m.from_user.id):
+        return await m.answer(T["admin_only"]["en"])
+    p = m.text.split()
+    if len(p) != 2 or not p[1].isdigit():
+        return await m.answer("Usage: /resetmin USER_ID")
+    uid = int(p[1])
+    with conn() as c:
+        c.execute("DELETE FROM user_min_orders WHERE user_id=?", (uid,))
+        c.commit()
+    await m.answer(f"Custom minimum removed.\nUser ID: {uid}\nDefault minimum: {MIN_ORDER:.2f} USDT")
+
 @dp.callback_query(F.data.startswith("lang:"))
 async def cb_lang(cq: CallbackQuery):
+    if await block_if_banned(cq):
+        return
     ensure(cq.from_user)
     set_lang(cq.from_user.id, cq.data.split(":")[1])
     await safe_edit(cq, txt(cq.from_user.id, "welcome"), reply_markup=kb_main(cq.from_user.id))
@@ -764,27 +852,37 @@ async def cb_lang(cq: CallbackQuery):
 
 @dp.callback_query(F.data == "choose_lang")
 async def cb_choose_lang(cq: CallbackQuery):
+    if await block_if_banned(cq):
+        return
     await safe_edit(cq, T["choose_lang"][lang(cq.from_user.id)], reply_markup=kb_lang())
     await cq.answer()
 
 @dp.callback_query(F.data == "main")
 async def cb_main(cq: CallbackQuery):
+    if await block_if_banned(cq):
+        return
     await safe_edit(cq, txt(cq.from_user.id, "welcome"), reply_markup=kb_main(cq.from_user.id))
     await cq.answer()
 
 @dp.callback_query(F.data == "shop")
 async def cb_shop(cq: CallbackQuery):
+    if await block_if_banned(cq):
+        return
     await safe_edit(cq, txt(cq.from_user.id, "category_text"), reply_markup=kb_cats(cq.from_user.id))
     await cq.answer()
 
 @dp.callback_query(F.data == "topup")
 async def cb_topup(cq: CallbackQuery):
+    if await block_if_banned(cq):
+        return
     text = txt(cq.from_user.id, "pay", wallet=USDT_BEP20_ADDRESS, bybit=BYBIT_ID, support=SUPPORT_USERNAME)
     await safe_edit(cq, text, reply_markup=payment_keyboard(cq.from_user.id))
     await cq.answer()
 
 @dp.callback_query(F.data == "paid")
 async def cb_paid(cq: CallbackQuery):
+    if await block_if_banned(cq):
+        return
     ensure(cq.from_user)
     with conn() as c:
         cur = c.execute(
@@ -802,6 +900,8 @@ async def cb_paid(cq: CallbackQuery):
 
 @dp.callback_query(F.data == "copy_usdt")
 async def cb_copy_usdt(cq: CallbackQuery):
+    if await block_if_banned(cq):
+        return
     # Telegram bots cannot copy text directly to the user's clipboard.
     # This sends the wallet address alone in a separate message so the user can copy it easily.
     await cq.answer("USDT address sent below")
@@ -812,6 +912,8 @@ async def cb_copy_usdt(cq: CallbackQuery):
 
 @dp.callback_query(F.data == "faq")
 async def cb_faq(cq: CallbackQuery):
+    if await block_if_banned(cq):
+        return
     l = lang(cq.from_user.id)
     if l == "ar":
         text = (
@@ -854,6 +956,8 @@ async def cb_faq(cq: CallbackQuery):
 
 @dp.callback_query(F.data == "referrals")
 async def cb_referrals(cq: CallbackQuery):
+    if await block_if_banned(cq):
+        return
     ensure(cq.from_user)
     invited, earnings = referral_stats(cq.from_user.id)
     bot_username = (await bot.get_me()).username
@@ -870,6 +974,8 @@ async def cb_referrals(cq: CallbackQuery):
 
 @dp.callback_query(F.data == "balance")
 async def cb_balance(cq: CallbackQuery):
+    if await block_if_banned(cq):
+        return
     u = user(cq.from_user.id)
     b = float(u["balance"]) if u else 0.0
     code, discount = get_discount(cq.from_user.id)
@@ -885,6 +991,8 @@ async def cb_balance(cq: CallbackQuery):
 
 @dp.callback_query(F.data == "support")
 async def cb_support(cq: CallbackQuery):
+    if await block_if_banned(cq):
+        return
     text = txt(cq.from_user.id, "pay", wallet=USDT_BEP20_ADDRESS, bybit=BYBIT_ID, support=SUPPORT_USERNAME)
     await safe_edit(cq, text, reply_markup=InlineKeyboardMarkup(inline_keyboard=[
         [styled_button(text=SUPPORT_USERNAME, url=f"https://t.me/{SUPPORT_USERNAME.replace('@','')}", style="success", icon_custom_emoji_id=CUSTOM_EMOJI["support"])],
@@ -895,6 +1003,8 @@ async def cb_support(cq: CallbackQuery):
 
 @dp.callback_query(F.data == "orders")
 async def cb_orders(cq: CallbackQuery):
+    if await block_if_banned(cq):
+        return
     with conn() as c:
         rows = c.execute("SELECT * FROM orders WHERE user_id=? ORDER BY id DESC LIMIT 10", (cq.from_user.id,)).fetchall()
     if not rows:
@@ -908,6 +1018,8 @@ async def cb_orders(cq: CallbackQuery):
 
 @dp.callback_query(F.data == "latest")
 async def cb_latest(cq: CallbackQuery):
+    if await block_if_banned(cq):
+        return
     with conn() as c:
         rows = c.execute("SELECT * FROM orders ORDER BY id DESC LIMIT 10").fetchall()
     if not rows:
@@ -921,6 +1033,8 @@ async def cb_latest(cq: CallbackQuery):
 
 @dp.callback_query(F.data == "profile")
 async def cb_profile(cq: CallbackQuery):
+    if await block_if_banned(cq):
+        return
     u = user(cq.from_user.id)
     invited, earnings = referral_stats(cq.from_user.id)
     b = float(u["balance"]) if u else 0.0
@@ -937,6 +1051,8 @@ async def cb_profile(cq: CallbackQuery):
 
 @dp.callback_query(F.data == "special_offers")
 async def cb_special_offers(cq: CallbackQuery):
+    if await block_if_banned(cq):
+        return
     text = (
         "Special Offers\n\n"
         "HOT DEAL: Razer Gold and PUBG UC are available with trader prices.\n"
@@ -948,6 +1064,8 @@ async def cb_special_offers(cq: CallbackQuery):
 
 @dp.callback_query(F.data == "best_sellers")
 async def cb_best_sellers(cq: CallbackQuery):
+    if await block_if_banned(cq):
+        return
     text = (
         "Best Sellers\n\n"
         "Razer Gold\n"
@@ -962,6 +1080,8 @@ async def cb_best_sellers(cq: CallbackQuery):
 
 @dp.callback_query(F.data == "reviews")
 async def cb_reviews(cq: CallbackQuery):
+    if await block_if_banned(cq):
+        return
     text = (
         "Customer Reviews\n\n"
         "Open the MD STORE Web App to view customer reviews, ratings, and proof of recent deals."
@@ -974,6 +1094,8 @@ async def cb_reviews(cq: CallbackQuery):
 
 @dp.callback_query(F.data == "coupons")
 async def cb_coupons(cq: CallbackQuery):
+    if await block_if_banned(cq):
+        return
     text = (
         "Coupons\n\n"
         "WELCOME5\n"
@@ -985,6 +1107,8 @@ async def cb_coupons(cq: CallbackQuery):
 
 @dp.callback_query(F.data == "wholesale")
 async def cb_wholesale(cq: CallbackQuery):
+    if await block_if_banned(cq):
+        return
     text = (
         "Wholesale Prices\n\n"
         "MD STORE supplies digital cards and game top-ups for traders and resellers.\n"
@@ -999,6 +1123,8 @@ async def cb_wholesale(cq: CallbackQuery):
 
 @dp.callback_query(F.data.startswith("cat:"))
 async def cb_cat(cq: CallbackQuery):
+    if await block_if_banned(cq):
+        return
     cat_key = cq.data.split(":")[1]
     cat = PRODUCTS.get(cat_key, {})
     if is_hidden_category(cat_key, cat):
@@ -1009,6 +1135,8 @@ async def cb_cat(cq: CallbackQuery):
 
 @dp.callback_query(F.data.startswith("view:"))
 async def cb_view(cq: CallbackQuery):
+    if await block_if_banned(cq):
+        return
     _, cat_key, pid = cq.data.split(":")
     item = get_item(cat_key, pid)
     if not item:
@@ -1020,6 +1148,8 @@ async def cb_view(cq: CallbackQuery):
 
 @dp.callback_query(F.data.startswith("addcart:"))
 async def cb_addcart(cq: CallbackQuery):
+    if await block_if_banned(cq):
+        return
     _, cat_key, pid = cq.data.split(":")
     item = get_item(cat_key, pid)
     if not item:
@@ -1034,6 +1164,8 @@ async def cb_addcart(cq: CallbackQuery):
 
 @dp.callback_query(F.data.startswith("addfav:"))
 async def cb_addfav(cq: CallbackQuery):
+    if await block_if_banned(cq):
+        return
     _, cat_key, pid = cq.data.split(":")
     item = get_item(cat_key, pid)
     if not item:
@@ -1048,6 +1180,8 @@ async def cb_addfav(cq: CallbackQuery):
 
 @dp.callback_query(F.data == "favorites")
 async def cb_favorites(cq: CallbackQuery):
+    if await block_if_banned(cq):
+        return
     l = lang(cq.from_user.id)
     with conn() as c:
         rows = c.execute("SELECT * FROM favorites WHERE user_id=? ORDER BY created_at DESC", (cq.from_user.id,)).fetchall()
@@ -1064,6 +1198,8 @@ async def cb_favorites(cq: CallbackQuery):
 
 @dp.callback_query(F.data == "cart")
 async def cb_cart(cq: CallbackQuery):
+    if await block_if_banned(cq):
+        return
     l = lang(cq.from_user.id)
     with conn() as c:
         rows = c.execute("SELECT * FROM cart WHERE user_id=? ORDER BY id DESC", (cq.from_user.id,)).fetchall()
@@ -1092,6 +1228,8 @@ async def cb_cart(cq: CallbackQuery):
 
 @dp.callback_query(F.data == "clearcart")
 async def cb_clearcart(cq: CallbackQuery):
+    if await block_if_banned(cq):
+        return
     with conn() as c:
         c.execute("DELETE FROM cart WHERE user_id=?", (cq.from_user.id,))
         c.commit()
@@ -1117,6 +1255,8 @@ async def create_order(cq: CallbackQuery, product: str, price: float, gift_to: s
 
 @dp.callback_query(F.data == "checkout")
 async def cb_checkout(cq: CallbackQuery):
+    if await block_if_banned(cq):
+        return
     u = user(cq.from_user.id)
     balance = float(u["balance"]) if u else 0.0
     l = lang(cq.from_user.id)
@@ -1154,6 +1294,8 @@ async def cb_checkout(cq: CallbackQuery):
 
 @dp.callback_query(F.data.startswith("buy:"))
 async def cb_buy(cq: CallbackQuery):
+    if await block_if_banned(cq):
+        return
     _, cat_key, pid = cq.data.split(":")
     item = get_item(cat_key, pid)
     if not item:
@@ -1188,6 +1330,8 @@ async def cb_buy(cq: CallbackQuery):
 
 @dp.callback_query(F.data.startswith("gift:"))
 async def cb_gift(cq: CallbackQuery):
+    if await block_if_banned(cq):
+        return
     _, cat_key, pid = cq.data.split(":")
     item = get_item(cat_key, pid)
     if not item:
@@ -1205,6 +1349,8 @@ async def cb_gift(cq: CallbackQuery):
 
 @dp.callback_query(F.data.startswith("confirmgift:"))
 async def cb_confirm_gift(cq: CallbackQuery):
+    if await block_if_banned(cq):
+        return
     _, cat_key, pid = cq.data.split(":")
     item = get_item(cat_key, pid)
     if not item:
@@ -1226,6 +1372,8 @@ async def cb_confirm_gift(cq: CallbackQuery):
 
 @dp.callback_query(F.data.startswith("confirm:"))
 async def cb_confirm(cq: CallbackQuery):
+    if await block_if_banned(cq):
+        return
     _, cat_key, pid = cq.data.split(":")
     item = get_item(cat_key, pid)
     if not item:
