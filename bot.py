@@ -26,13 +26,15 @@ BYBIT_ID = os.getenv("BYBIT_ID", "524739312")
 USDT_BEP20_ADDRESS = os.getenv("USDT_BEP20_ADDRESS", "0xA2E0c2eC432953Dd2F832488a1EC061e6e761361")
 MIN_ORDER = float(os.getenv("MIN_ORDER_USDT", "50"))
 
-DB = os.getenv("DATABASE_PATH", "md_store_bot.db")
+DB_PATH_RAW = os.getenv("DATABASE_PATH", "md_store_bot.db")
+DB = str(Path(DB_PATH_RAW) if Path(DB_PATH_RAW).is_absolute() else BASE_DIR / DB_PATH_RAW)
 ADMIN_IDS = {int(x) for x in os.getenv("ADMIN_IDS", "7504221023").replace(" ", "").split(",") if x.isdigit()}
 
 if not BOT_TOKEN:
     raise RuntimeError("BOT_TOKEN missing in .env or Railway Variables")
 
-PRODUCTS = json.loads(Path("products.json").read_text(encoding="utf-8"))
+PRODUCTS_PATH = BASE_DIR / "products.json"
+PRODUCTS = json.loads(PRODUCTS_PATH.read_text(encoding="utf-8"))
 
 session = AiohttpSession()
 bot = Bot(BOT_TOKEN, session=session)
@@ -148,7 +150,11 @@ T = {
     "no_orders": {"ar": "لا توجد طلبات حالياً.", "en": "No orders yet.", "ru": "Заказов пока нет."},
     "no_latest": {"ar": "لا توجد عمليات شراء حالياً.", "en": "No purchases yet.", "ru": "Покупок пока нет."},
     "admin_only": {"ar": "هذا الأمر للأدمن فقط.", "en": "This command is for admin only.", "ru": "Эта команда только для администратора."},
+    "cancel_payment": {"ar": "إلغاء الدفع", "en": "Cancel Payment", "ru": "Отменить оплату"},
+    "payment_cancelled": {"ar": "تم إلغاء عملية الدفع.", "en": "Payment request cancelled.", "ru": "Запрос на оплату отменён."},
+    "payment_expired": {"ar": "انتهت صلاحية عملية الدفع. يرجى إنشاء عملية دفع جديدة.", "en": "This payment request has expired. Please create a new one.", "ru": "Срок оплаты истёк. Создайте новый запрос."},
 }
+
 
 def conn():
     c = sqlite3.connect(DB)
@@ -204,6 +210,14 @@ def init_db():
             status TEXT DEFAULT 'pending',
             created_at TEXT
         )""")
+        c.execute("""CREATE TABLE IF NOT EXISTS product_prices(
+            cat_key TEXT NOT NULL,
+            product_id TEXT NOT NULL,
+            label TEXT DEFAULT '',
+            price REAL,
+            updated_at TEXT,
+            PRIMARY KEY(cat_key, product_id)
+        )""")
         c.execute("""CREATE TABLE IF NOT EXISTS settings(
             key TEXT PRIMARY KEY,
             value TEXT
@@ -232,6 +246,18 @@ def init_db():
             c.execute("ALTER TABLE orders ADD COLUMN gift_to TEXT DEFAULT ''")
         if "created_at" not in order_cols:
             c.execute("ALTER TABLE orders ADD COLUMN created_at TEXT")
+
+        pay_cols = {row[1] for row in c.execute("PRAGMA table_info(payment_requests)").fetchall()}
+        if "expires_at" not in pay_cols:
+            c.execute("ALTER TABLE payment_requests ADD COLUMN expires_at TEXT")
+        if "wallet" not in pay_cols:
+            c.execute("ALTER TABLE payment_requests ADD COLUMN wallet TEXT DEFAULT ''")
+        if "amount" not in pay_cols:
+            c.execute("ALTER TABLE payment_requests ADD COLUMN amount REAL DEFAULT 0")
+        if "updated_at" not in pay_cols:
+            c.execute("ALTER TABLE payment_requests ADD COLUMN updated_at TEXT")
+
+        seed_product_prices(c, discount_percent=5.0)
 
         c.execute("""CREATE TABLE IF NOT EXISTS user_min_orders(
             user_id INTEGER PRIMARY KEY,
@@ -326,7 +352,7 @@ def remove_balance(uid, amount):
         c.execute("UPDATE users SET balance=MAX(balance-?,0) WHERE user_id=?", (amount, uid))
         c.commit()
 
-def iter_items(cat_key):
+def raw_iter_items(cat_key):
     items = PRODUCTS.get(cat_key, {}).get("items", [])
     normalized = []
     for item in items:
@@ -334,6 +360,49 @@ def iter_items(cat_key):
             normalized.append({"id": str(item.get("id")), "label": str(item.get("label")), "price": item.get("price")})
         elif isinstance(item, (list, tuple)) and len(item) >= 3:
             normalized.append({"id": str(item[0]), "label": str(item[1]), "price": item[2]})
+    return normalized
+
+def seed_product_prices(c, discount_percent: float = 5.0):
+    # حفظ الأسعار داخل قاعدة البيانات حتى لا تضيع عند تعديل ملف البايثون.
+    # يتم تطبيق تخفيض 5% مرة واحدة فقط على الأسعار الأصلية عند أول تشغيل للتحديث.
+    flag = c.execute("SELECT value FROM settings WHERE key=?", ("product_prices_seeded_v2",)).fetchone()
+    if flag:
+        return
+    for cat_key in PRODUCTS.keys():
+        for item in raw_iter_items(cat_key):
+            price = item.get("price")
+            if price is None:
+                db_price = None
+            else:
+                db_price = round(float(price) * (1 - discount_percent / 100.0), 2)
+            c.execute(
+                "INSERT OR IGNORE INTO product_prices(cat_key, product_id, label, price, updated_at) VALUES(?,?,?,?,?)",
+                (cat_key, item["id"], item["label"], db_price, datetime.utcnow().isoformat())
+            )
+    c.execute("INSERT OR REPLACE INTO settings(key, value) VALUES(?,?)", ("product_prices_seeded_v2", "1"))
+
+def get_product_price(cat_key: str, product_id: str, fallback=None):
+    try:
+        with conn() as c:
+            row = c.execute("SELECT price FROM product_prices WHERE cat_key=? AND product_id=?", (cat_key, str(product_id))).fetchone()
+        if row and row["price"] is not None:
+            return float(row["price"])
+    except Exception:
+        pass
+    return fallback
+
+def set_product_price(cat_key: str, product_id: str, price: float, label: str = ""):
+    with conn() as c:
+        c.execute(
+            "INSERT OR REPLACE INTO product_prices(cat_key, product_id, label, price, updated_at) VALUES(?,?,?,?,?)",
+            (cat_key, str(product_id), label, float(price), datetime.utcnow().isoformat())
+        )
+        c.commit()
+
+def iter_items(cat_key):
+    normalized = raw_iter_items(cat_key)
+    for item in normalized:
+        item["price"] = get_product_price(cat_key, item["id"], item.get("price"))
     return normalized
 
 def get_item(cat_key, pid):
@@ -522,11 +591,14 @@ def kb_product_actions(uid, cat_key, pid):
         [styled_button(text=T["back"][l], callback_data=f"cat:{cat_key}", style="danger")],
     ])
 
-def payment_keyboard(uid):
+def payment_keyboard(uid, payment_id: Optional[int] = None):
     l = lang(uid)
+    paid_cb = f"paid:{payment_id}" if payment_id else "paid"
+    cancel_cb = f"cancel_payment:{payment_id}" if payment_id else "main"
     return InlineKeyboardMarkup(inline_keyboard=[
         [styled_button(text=T["copy_usdt"][l], callback_data="copy_usdt", style="primary", icon_custom_emoji_id=CUSTOM_EMOJI["topup"])],
-        [styled_button(text=T["i_paid"][l], callback_data="paid", style="success", icon_custom_emoji_id=CUSTOM_EMOJI["topup"])],
+        [styled_button(text=T["i_paid"][l], callback_data=paid_cb, style="success", icon_custom_emoji_id=CUSTOM_EMOJI["topup"])],
+        [styled_button(text=T["cancel_payment"][l], callback_data=cancel_cb, style="danger")],
         [styled_button(text=SUPPORT_USERNAME, url=f"https://t.me/{SUPPORT_USERNAME.replace('@','')}", style="success", icon_custom_emoji_id=CUSTOM_EMOJI["support"])],
         [styled_button(text=T["back"][l], callback_data="main", style="danger")],
     ])
@@ -534,6 +606,59 @@ def payment_keyboard(uid):
 def main_back_keyboard(uid):
     l = lang(uid)
     return InlineKeyboardMarkup(inline_keyboard=[[styled_button(text=T["main"][l], callback_data="main", style="primary")]])
+
+def create_payment_request(uid: int, username: str = ""):
+    now = datetime.utcnow()
+    expires = now + timedelta(minutes=20)
+    with conn() as c:
+        # أي عملية قديمة قيد الانتظار لنفس المستخدم تصبح منتهية عند إنشاء عملية جديدة.
+        c.execute("UPDATE payment_requests SET status='expired', updated_at=? WHERE user_id=? AND status='pending'", (now.isoformat(), uid))
+        cur = c.execute(
+            "INSERT INTO payment_requests(user_id, username, status, wallet, created_at, expires_at, updated_at) VALUES(?,?,?,?,?,?,?)",
+            (uid, username or "", "pending", USDT_BEP20_ADDRESS, now.isoformat(), expires.isoformat(), now.isoformat())
+        )
+        pid = cur.lastrowid
+        c.commit()
+    return pid, expires
+
+def get_payment_request(payment_id: int):
+    with conn() as c:
+        return c.execute("SELECT * FROM payment_requests WHERE id=?", (payment_id,)).fetchone()
+
+def expire_old_payment_requests():
+    now = datetime.utcnow().isoformat()
+    with conn() as c:
+        c.execute("UPDATE payment_requests SET status='expired', updated_at=? WHERE status='pending' AND expires_at IS NOT NULL AND expires_at < ?", (now, now))
+        c.commit()
+
+def payment_is_expired(row) -> bool:
+    try:
+        return bool(row and row["expires_at"] and datetime.utcnow() >= datetime.fromisoformat(row["expires_at"]))
+    except Exception:
+        return False
+
+def payment_message(uid: int, payment_id: int, expires_at: datetime) -> str:
+    l = lang(uid)
+    if l == "ar":
+        return (
+            f"طلب شحن الرصيد #{payment_id}\n\n"
+            f"USDT BEP20 Address:\n{USDT_BEP20_ADDRESS}\n\n"
+            "لديك 20 دقيقة لإتمام الدفع على هذا العنوان. بعد انتهاء الوقت سيتم إلغاء عملية الدفع تلقائيا.\n\n"
+            "بعد الدفع اضغط زر I Have Paid ثم أرسل لقطة شاشة أو رابط/هاش المعاملة للدعم."
+        )
+    if l == "ru":
+        return (
+            f"Запрос на пополнение #{payment_id}\n\n"
+            f"USDT BEP20 Address:\n{USDT_BEP20_ADDRESS}\n\n"
+            "У вас есть 20 минут для оплаты на этот адрес. После окончания времени запрос будет отменён автоматически.\n\n"
+            "После оплаты нажмите I Have Paid и отправьте скриншот или hash/link в поддержку."
+        )
+    return (
+        f"Top Up Request #{payment_id}\n\n"
+        f"USDT BEP20 Address:\n{USDT_BEP20_ADDRESS}\n\n"
+        "You have 20 minutes to complete the payment to this address. After the time ends, this payment request will be cancelled automatically.\n\n"
+        "After payment, press I Have Paid and send the screenshot or transaction hash/link to support."
+    )
 
 async def safe_edit(cq: CallbackQuery, text: str, reply_markup=None, **kwargs):
     """Edit the current bot message without deleting it, so buttons feel fast and smooth."""
@@ -622,8 +747,16 @@ async def admin_panel(m: Message):
         "/broadcast MESSAGE\n"
         "/addcoupon CODE PERCENT\n"
         "/delcoupon CODE\n"
-        "/coupons\n/ban USER_ID\n/unban USER_ID\n/setmin USER_ID AMOUNT\n/resetmin USER_ID\n"
-        "/discount24"
+        "/coupons\n"
+        "/ban USER_ID\n"
+        "/unban USER_ID\n"
+        "/setmin USER_ID AMOUNT\n"
+        "/resetmin USER_ID\n"
+        "/discount24\n"
+        "/prices\n"
+        "/setprice CAT_KEY PRODUCT_ID PRICE\n"
+        "/discountall PERCENT\n"
+        "/payments"
     )
 
 @dp.message(Command("addbalance"))
@@ -768,6 +901,79 @@ async def cmd_discount24(m: Message):
     until = start_flash_discount(2.0, 24)
     await m.answer(f"2% discount activated for 24 hours. Ends UTC: {until}")
 
+@dp.message(Command("prices"))
+async def cmd_prices(m: Message):
+    if not admin(m.from_user.id):
+        return await m.answer(T["admin_only"]["en"])
+    lines = ["Product Prices", "Use: /setprice CAT_KEY PRODUCT_ID PRICE", ""]
+    for cat_key, cat in PRODUCTS.items():
+        if is_hidden_category(cat_key, cat):
+            continue
+        lines.append(f"[{cat_key}] {cat.get('en', cat_key)}")
+        for item in iter_items(cat_key):
+            lines.append(f"  {item['id']} | {item['label']} | {price_text(item['price'])}")
+        lines.append("")
+    text = "\n".join(lines)
+    for i in range(0, len(text), 3900):
+        await m.answer(text[i:i+3900])
+
+@dp.message(Command("setprice"))
+async def cmd_setprice(m: Message):
+    if not admin(m.from_user.id):
+        return await m.answer(T["admin_only"]["en"])
+    p = m.text.split()
+    if len(p) != 4:
+        return await m.answer("Usage: /setprice CAT_KEY PRODUCT_ID PRICE")
+    cat_key, pid = p[1], p[2]
+    item = get_item(cat_key, pid)
+    if not item:
+        return await m.answer("Product not found. Use /prices to see CAT_KEY and PRODUCT_ID.")
+    try:
+        price = float(p[3])
+        set_product_price(cat_key, pid, price, item.get("label", ""))
+        await m.answer(f"Price updated.\nCategory: {cat_key}\nProduct: {item['label']}\nNew price: {price:.2f} USDT")
+    except Exception:
+        await m.answer("Invalid price.")
+
+@dp.message(Command("discountall"))
+async def cmd_discountall(m: Message):
+    if not admin(m.from_user.id):
+        return await m.answer(T["admin_only"]["en"])
+    p = m.text.split()
+    if len(p) != 2:
+        return await m.answer("Usage: /discountall PERCENT")
+    try:
+        percent = float(p[1])
+        if percent < 0 or percent > 90:
+            return await m.answer("Percent must be between 0 and 90.")
+        count = 0
+        for cat_key, cat in PRODUCTS.items():
+            if is_hidden_category(cat_key, cat):
+                continue
+            for item in iter_items(cat_key):
+                if item.get("price") is None:
+                    continue
+                new_price = round(float(item["price"]) * (1 - percent / 100.0), 2)
+                set_product_price(cat_key, item["id"], new_price, item.get("label", ""))
+                count += 1
+        await m.answer(f"Discount applied to all current product prices.\nPercent: {percent}%\nUpdated products: {count}")
+    except Exception:
+        await m.answer("Invalid percent.")
+
+@dp.message(Command("payments"))
+async def cmd_payments(m: Message):
+    if not admin(m.from_user.id):
+        return await m.answer(T["admin_only"]["en"])
+    expire_old_payment_requests()
+    with conn() as c:
+        rows = c.execute("SELECT * FROM payment_requests ORDER BY id DESC LIMIT 30").fetchall()
+    if not rows:
+        return await m.answer("No payment requests.")
+    text = "Payment Requests\n\n"
+    for r in rows:
+        text += f"#{r['id']} | User: {r['user_id']} | @{r['username']} | {r['status']} | Created: {r['created_at']} | Expires: {r['expires_at'] or '-'}\n"
+    await m.answer(text[:4000])
+
 @dp.message(Command("coupon"))
 async def cmd_coupon(m: Message):
     ensure(m.from_user)
@@ -875,39 +1081,74 @@ async def cb_shop(cq: CallbackQuery):
 async def cb_topup(cq: CallbackQuery):
     if await block_if_banned(cq):
         return
-    text = txt(cq.from_user.id, "pay", wallet=USDT_BEP20_ADDRESS, bybit=BYBIT_ID, support=SUPPORT_USERNAME)
-    await safe_edit(cq, text, reply_markup=payment_keyboard(cq.from_user.id))
-    await cq.answer()
+    ensure(cq.from_user)
+    expire_old_payment_requests()
+    pid, expires = create_payment_request(cq.from_user.id, cq.from_user.username or "")
+    await safe_edit(cq, payment_message(cq.from_user.id, pid, expires), reply_markup=payment_keyboard(cq.from_user.id, pid))
+    await cq.answer("Payment request created")
 
-@dp.callback_query(F.data == "paid")
+@dp.callback_query(F.data.startswith("paid"))
 async def cb_paid(cq: CallbackQuery):
     if await block_if_banned(cq):
         return
     ensure(cq.from_user)
+    expire_old_payment_requests()
+    parts = cq.data.split(":")
+    pid = int(parts[1]) if len(parts) == 2 and parts[1].isdigit() else 0
+    if not pid:
+        with conn() as c:
+            row = c.execute("SELECT * FROM payment_requests WHERE user_id=? AND status='pending' ORDER BY id DESC LIMIT 1", (cq.from_user.id,)).fetchone()
+        if not row:
+            pid, _ = create_payment_request(cq.from_user.id, cq.from_user.username or "")
+        else:
+            pid = int(row["id"])
+    row = get_payment_request(pid)
+    if not row or int(row["user_id"]) != int(cq.from_user.id):
+        return await cq.answer("Payment request not found", show_alert=True)
+    if row["status"] != "pending" or payment_is_expired(row):
+        with conn() as c:
+            c.execute("UPDATE payment_requests SET status='expired', updated_at=? WHERE id=? AND status='pending'", (datetime.utcnow().isoformat(), pid))
+            c.commit()
+        await safe_edit(cq, txt(cq.from_user.id, "payment_expired"), reply_markup=main_back_keyboard(cq.from_user.id))
+        return await cq.answer()
     with conn() as c:
-        cur = c.execute(
-            "INSERT INTO payment_requests(user_id, username, status, created_at) VALUES(?,?,?,?)",
-            (cq.from_user.id, cq.from_user.username or "", "pending", datetime.utcnow().isoformat())
-        )
-        pid = cur.lastrowid
+        c.execute("UPDATE payment_requests SET status='paid', updated_at=? WHERE id=?", (datetime.utcnow().isoformat(), pid))
         c.commit()
     await notify_admins(
-        f"Payment Notice #{pid}\n\nUser ID: {cq.from_user.id}\nUsername: @{cq.from_user.username}\nStatus: Pending\n\nAsk the user for screenshot/hash if needed."
+        f"Payment Notice #{pid}\n\nUser ID: {cq.from_user.id}\nUsername: @{cq.from_user.username}\nStatus: Paid / Waiting Review\nWallet: {USDT_BEP20_ADDRESS}\n\nAsk the user for screenshot/hash if needed, then add balance manually after verification."
     )
     await safe_edit(cq, txt(cq.from_user.id, "paid_sent"), reply_markup=main_back_keyboard(cq.from_user.id))
     await cq.answer()
 
+@dp.callback_query(F.data.startswith("cancel_payment:"))
+async def cb_cancel_payment(cq: CallbackQuery):
+    if await block_if_banned(cq):
+        return
+    pid = int(cq.data.split(":", 1)[1])
+    row = get_payment_request(pid)
+    if row and int(row["user_id"]) == int(cq.from_user.id) and row["status"] == "pending":
+        with conn() as c:
+            c.execute("UPDATE payment_requests SET status='cancelled', updated_at=? WHERE id=?", (datetime.utcnow().isoformat(), pid))
+            c.commit()
+    await safe_edit(cq, txt(cq.from_user.id, "payment_cancelled"), reply_markup=main_back_keyboard(cq.from_user.id))
+    await cq.answer()
 
 @dp.callback_query(F.data == "copy_usdt")
 async def cb_copy_usdt(cq: CallbackQuery):
     if await block_if_banned(cq):
         return
-    # Telegram bots cannot copy text directly to the user's clipboard.
-    # This sends the wallet address alone in a separate message so the user can copy it easily.
+    expire_old_payment_requests()
+    with conn() as c:
+        row = c.execute("SELECT * FROM payment_requests WHERE user_id=? AND status='pending' ORDER BY id DESC LIMIT 1", (cq.from_user.id,)).fetchone()
+    if not row:
+        pid, expires = create_payment_request(cq.from_user.id, cq.from_user.username or "")
+    else:
+        pid, expires = int(row["id"]), datetime.fromisoformat(row["expires_at"])
     await cq.answer("USDT address sent below")
     await cq.message.answer(
-        f"USDT BEP20 Address:\n\n`{USDT_BEP20_ADDRESS}`\n\nTap and hold the address to copy it.",
-        parse_mode="Markdown"
+        f"Top Up Request #{pid}\n\nUSDT BEP20 Address:\n\n`{USDT_BEP20_ADDRESS}`\n\nYou have 20 minutes to pay. Tap and hold the address to copy it.",
+        parse_mode="Markdown",
+        reply_markup=payment_keyboard(cq.from_user.id, pid)
     )
 
 @dp.callback_query(F.data == "faq")
