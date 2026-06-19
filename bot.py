@@ -46,6 +46,10 @@ dp = Dispatcher()
 PENDING_QUANTITY: Dict[int, Dict[str, Any]] = {}
 PENDING_TOPUP: Dict[int, Dict[str, Any]] = {}
 
+# Maps copied user messages in admin chats to the original user ID.
+# Admin can reply directly to a copied user message and the bot will send the reply to that user.
+ADMIN_REPLY_TARGETS: Dict[tuple[int, int], int] = {}
+
 LANGS = {"ar": "العربية", "en": "English", "ru": "Русский"}
 
 # Custom emoji IDs used in Telegram colored buttons.
@@ -553,9 +557,7 @@ def menu_reply_keyboard(uid: int) -> ReplyKeyboardMarkup:
             [KeyboardButton(text=T["products"][l])],
             [KeyboardButton(text=T["topup"][l]), KeyboardButton(text=T["balance"][l])],
             [KeyboardButton(text=T["orders"][l]), KeyboardButton(text=T["cart"][l])],
-            [KeyboardButton(text=T["special_offers"][l]), KeyboardButton(text=T["best_sellers"][l])],
-            [KeyboardButton(text=T["favorites"][l]), KeyboardButton(text=T["profile"][l])],
-            [KeyboardButton(text=T["referrals"][l]), KeyboardButton(text=T["language"][l])],
+            [KeyboardButton(text=T["profile"][l]), KeyboardButton(text=T["language"][l])],
             [KeyboardButton(text=T["support"][l]), KeyboardButton(text=T["channel"][l])],
         ],
         resize_keyboard=True,
@@ -791,6 +793,69 @@ async def safe_edit(cq: CallbackQuery, text: str, reply_markup=None, **kwargs):
     except Exception:
         pass
 
+
+async def send_to_user_from_admin(m: Message) -> bool:
+    """If an admin replies to a copied user message, send the admin message to that user."""
+    if not admin(m.from_user.id) or not m.reply_to_message:
+        return False
+    target_id = ADMIN_REPLY_TARGETS.get((m.chat.id, m.reply_to_message.message_id))
+    if not target_id:
+        return False
+
+    try:
+        if m.text:
+            await bot.send_message(target_id, m.text)
+        elif m.caption and (m.photo or m.document or m.video):
+            await bot.copy_message(target_id, m.chat.id, m.message_id)
+        else:
+            await bot.copy_message(target_id, m.chat.id, m.message_id)
+        await m.answer(f"Sent to user {target_id}.")
+    except Exception as e:
+        await m.answer(f"Could not send message to user {target_id}: {e}")
+    return True
+
+
+async def send_user_message_to_admins(m: Message):
+    """Forward/copy every non-admin customer message to admins with visible media and reply support."""
+    if admin(m.from_user.id):
+        return
+
+    content = m.text or m.caption or ""
+    if not content:
+        if m.photo:
+            content = "[Photo]"
+        elif m.document:
+            content = f"[Document] {m.document.file_name or ''}"
+        elif m.sticker:
+            content = "[Sticker]"
+        elif m.video:
+            content = "[Video]"
+        elif m.voice:
+            content = "[Voice]"
+        else:
+            content = "[Non-text message]"
+
+    header = (
+        f"User Message\n\n"
+        f"ID: {m.from_user.id}\n"
+        f"Username: @{m.from_user.username}\n"
+        f"Name: {m.from_user.first_name}\n\n"
+        f"Message:\n{content}\n\n"
+        f"Reply to the copied message below to answer this user."
+    )
+
+    for aid in ADMIN_IDS:
+        try:
+            await bot.send_message(aid, header)
+            copied = await bot.copy_message(aid, m.chat.id, m.message_id)
+            ADMIN_REPLY_TARGETS[(aid, copied.message_id)] = m.from_user.id
+        except Exception:
+            try:
+                sent = await bot.send_message(aid, header)
+                ADMIN_REPLY_TARGETS[(aid, sent.message_id)] = m.from_user.id
+            except Exception:
+                pass
+
 async def notify_admins(text):
     for aid in ADMIN_IDS:
         try:
@@ -872,7 +937,8 @@ async def admin_panel(m: Message):
         "/prices\n"
         "/setprice CAT_KEY PRODUCT_ID PRICE\n"
         "/discountall PERCENT\n"
-        "/payments"
+        "/payments\n"
+        "/reply USER_ID MESSAGE"
     )
 
 @dp.message(Command("addbalance"))
@@ -1752,6 +1818,22 @@ async def cb_confirm(cq: CallbackQuery):
     await safe_edit(cq, txt(cq.from_user.id, "order_done"), reply_markup=main_back_keyboard(cq.from_user.id))
     await cq.answer()
 
+
+@dp.message(Command("reply"))
+async def cmd_reply_user(m: Message):
+    if not admin(m.from_user.id):
+        return await m.answer(T["admin_only"]["en"])
+    parts = (m.text or "").split(maxsplit=2)
+    if len(parts) < 3 or not parts[1].isdigit():
+        return await m.answer("Usage: /reply USER_ID MESSAGE")
+    uid = int(parts[1])
+    message_text = parts[2]
+    try:
+        await bot.send_message(uid, message_text)
+        await m.answer(f"Sent to user {uid}.")
+    except Exception as e:
+        await m.answer(f"Could not send message: {e}")
+
 @dp.message(Command("cancel"))
 async def cancel_current_process(m: Message):
     ensure(m.from_user)
@@ -1766,6 +1848,8 @@ async def open_main_from_text(m: Message, callback_name: str):
 @dp.message(F.text)
 async def reply_keyboard_and_states(m: Message):
     ensure(m.from_user)
+    if await send_to_user_from_admin(m):
+        return
     if await block_if_banned(m):
         return
     text = (m.text or "").strip()
@@ -1919,42 +2003,15 @@ async def reply_keyboard_and_states(m: Message):
     if text == T["channel"][l]:
         return await m.answer(CHANNEL_URL, reply_markup=menu_reply_keyboard(m.from_user.id))
 
-    # Not a menu/state message: let the admin-forward handler below process it.
-    content = m.text or m.caption or ""
-    await notify_admins(
-        f"User Message\n\n"
-        f"ID: {m.from_user.id}\n"
-        f"Username: @{m.from_user.username}\n"
-        f"Name: {m.from_user.first_name}\n\n"
-        f"Message:\n{content}"
-    )
+    # Not a menu/state message: send it to admins with reply support.
+    await send_user_message_to_admins(m)
 
 @dp.message()
 async def forward_user_messages_to_admin(m: Message):
     ensure(m.from_user)
-    if admin(m.from_user.id):
+    if await send_to_user_from_admin(m):
         return
-    content = m.text or m.caption or ""
-    if not content:
-        if m.photo:
-            content = "[Photo]"
-        elif m.document:
-            content = f"[Document] {m.document.file_name or ''}"
-        elif m.sticker:
-            content = "[Sticker]"
-        elif m.video:
-            content = "[Video]"
-        elif m.voice:
-            content = "[Voice]"
-        else:
-            content = "[Non-text message]"
-    await notify_admins(
-        f"User Message\n\n"
-        f"ID: {m.from_user.id}\n"
-        f"Username: @{m.from_user.username}\n"
-        f"Name: {m.from_user.first_name}\n\n"
-        f"Message:\n{content}"
-    )
+    await send_user_message_to_admins(m)
 
 async def main():
     init_db()
