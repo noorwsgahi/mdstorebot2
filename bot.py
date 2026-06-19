@@ -26,6 +26,7 @@ BYBIT_ID = os.getenv("BYBIT_ID", "524739312")
 BINANCE_ID = os.getenv("BINANCE_ID", "1254699995")
 BINANCE_NOTE = os.getenv("BINANCE_NOTE", "E7988E77-166F-4C84-A")
 USDT_BEP20_ADDRESS = os.getenv("USDT_BEP20_ADDRESS", "0xA2E0c2eC432953Dd2F832488a1EC061e6e761361")
+USDT_TRC20_ADDRESS = os.getenv("USDT_TRC20_ADDRESS", "TBZRVqmYripCBqccN1JgKyNuZPZfotPn1E")
 MIN_ORDER = float(os.getenv("MIN_ORDER_USDT", "50"))
 
 DB_PATH_RAW = os.getenv("DATABASE_PATH", "md_store_bot.db")
@@ -130,6 +131,7 @@ T = {
     },
     "i_paid": {"ar": "تم الدفع", "en": "I Have Paid", "ru": "Я оплатил"},
     "pay_bep20": {"ar": "💎 USDT(BEP20)", "en": "💎 USDT(BEP20)", "ru": "💎 USDT(BEP20)"},
+    "pay_trc20": {"ar": "💎 USDT(TRC20)", "en": "💎 USDT(TRC20)", "ru": "💎 USDT(TRC20)"},
     "pay_binance": {"ar": "🪙 Binance ID", "en": "🪙 Binance ID", "ru": "🪙 Binance ID"},
     "pay_bybit": {"ar": "🔑 BYBIT", "en": "🔑 BYBIT", "ru": "🔑 BYBIT"},
     "enter_amount": {
@@ -586,7 +588,7 @@ def topup_methods_keyboard(uid: int) -> InlineKeyboardMarkup:
     l = lang(uid)
     return InlineKeyboardMarkup(inline_keyboard=[
         [styled_button(text=T["pay_bep20"][l], callback_data="paymethod:bep20", style="primary"),
-         styled_button(text=T["pay_binance"][l], callback_data="paymethod:binance", style="primary")],
+         styled_button(text=T["pay_trc20"][l], callback_data="paymethod:trc20", style="primary")],
         [styled_button(text=T["pay_bybit"][l], callback_data="paymethod:bybit", style="primary"),
          styled_button(text=T["back"][l], callback_data="main", style="danger")],
     ])
@@ -619,18 +621,21 @@ def balance_info_message(uid: int) -> str:
 
 def invoice_message(method: str, amount: float) -> str:
     amount_text = f"{amount:.2f}".rstrip("0").rstrip(".")
-    if method == "binance":
-        return (
-            f"🔑 UID: {BINANCE_ID}\n\n"
-            "Please send the amount to this UID and include the note\n\n"
-            f"{BINANCE_NOTE}\n\n"
-            "Make sure you are sending only USDT 💵. After that, click the '✅ I Have Paid' button."
-        )
     if method == "bybit":
         return (
             f"🔑 BYBIT ID: {BYBIT_ID}\n\n"
             f"Please send exactly {amount_text} USDT to this BYBIT ID.\n\n"
             "Make sure you are sending only USDT 💵. After that, click the '✅ I Have Paid' button."
+        )
+    if method == "trc20":
+        return (
+            f"✅ Kindly deposit exactly {amount_text} USDT (TRC20) to the address below:\n\n"
+            "💼\n\n"
+            f"{USDT_TRC20_ADDRESS}\n\n"
+            "👆 Tap to copy\n\n"
+            "⏰ This invoice will expire in 20 minutes.\n"
+            "⏬ Kindly complete the deposit of exact amount within this time frame.\n\n"
+            "🕑 This message will be deleted after 20 minutes. 🗑️"
         )
     return (
         f"✅ Kindly deposit exactly {amount_text} USDT (BSC) to the address below:\n\n"
@@ -728,12 +733,17 @@ def main_back_keyboard(uid):
 def create_payment_request(uid: int, username: str = "", amount: float = 0.0, method: str = "bep20"):
     now = datetime.utcnow()
     expires = now + timedelta(minutes=20)
+    wallet = USDT_BEP20_ADDRESS
+    if method == "trc20":
+        wallet = USDT_TRC20_ADDRESS
+    elif method == "bybit":
+        wallet = BYBIT_ID
     with conn() as c:
         # أي عملية قديمة قيد الانتظار لنفس المستخدم تصبح منتهية عند إنشاء عملية جديدة.
         c.execute("UPDATE payment_requests SET status='expired', updated_at=? WHERE user_id=? AND status='pending'", (now.isoformat(), uid))
         cur = c.execute(
             "INSERT INTO payment_requests(user_id, username, status, wallet, amount, method, created_at, expires_at, updated_at) VALUES(?,?,?,?,?,?,?,?,?)",
-            (uid, username or "", "pending", USDT_BEP20_ADDRESS, float(amount or 0), method, now.isoformat(), expires.isoformat(), now.isoformat())
+            (uid, username or "", "pending", wallet, float(amount or 0), method, now.isoformat(), expires.isoformat(), now.isoformat())
         )
         pid = cur.lastrowid
         c.commit()
@@ -1280,7 +1290,7 @@ async def cb_paymethod(cq: CallbackQuery):
     if await block_if_banned(cq):
         return
     method = cq.data.split(":", 1)[1]
-    if method not in {"bep20", "binance", "bybit"}:
+    if method not in {"bep20", "trc20", "bybit"}:
         return await cq.answer("Unavailable", show_alert=True)
     PENDING_TOPUP[cq.from_user.id] = {"method": method}
     await safe_edit(cq, txt(cq.from_user.id, "enter_amount"), reply_markup=InlineKeyboardMarkup(inline_keyboard=[
@@ -1697,8 +1707,6 @@ async def cb_checkout(cq: CallbackQuery):
 
     if balance <= 0:
         return await safe_edit(cq, txt(cq.from_user.id, "need_balance"), reply_markup=main_back_keyboard(cq.from_user.id))
-    if balance < get_min_order(cq.from_user.id):
-        return await safe_edit(cq, txt(cq.from_user.id, "min_order", min_order=get_min_order(cq.from_user.id)), reply_markup=main_back_keyboard(cq.from_user.id))
 
     with conn() as c:
         rows = c.execute("SELECT * FROM cart WHERE user_id=? ORDER BY id", (cq.from_user.id,)).fetchall()
@@ -1714,6 +1722,9 @@ async def cb_checkout(cq: CallbackQuery):
             total += float(item["price"] or 0.0)
             names.append(product_name(r["cat_key"], item, l))
     final, code, percent = apply_discount(cq.from_user.id, total)
+
+    if final < get_min_order(cq.from_user.id):
+        return await safe_edit(cq, txt(cq.from_user.id, "min_order", min_order=get_min_order(cq.from_user.id)), reply_markup=main_back_keyboard(cq.from_user.id))
 
     if balance < final:
         return await safe_edit(cq, txt(cq.from_user.id, "need_balance"), reply_markup=main_back_keyboard(cq.from_user.id))
@@ -1779,10 +1790,10 @@ async def cb_confirm_gift(cq: CallbackQuery):
     b = float(u["balance"]) if u else 0.0
     if b <= 0:
         return await safe_edit(cq, txt(cq.from_user.id, "need_balance"), reply_markup=main_back_keyboard(cq.from_user.id))
-    if b < get_min_order(cq.from_user.id):
-        return await safe_edit(cq, txt(cq.from_user.id, "min_order", min_order=get_min_order(cq.from_user.id)), reply_markup=main_back_keyboard(cq.from_user.id))
     price_val = float(item["price"] or 0.0)
     final, code, percent = apply_discount(cq.from_user.id, price_val)
+    if final < get_min_order(cq.from_user.id):
+        return await safe_edit(cq, txt(cq.from_user.id, "min_order", min_order=get_min_order(cq.from_user.id)), reply_markup=main_back_keyboard(cq.from_user.id))
     if b < final:
         return await safe_edit(cq, txt(cq.from_user.id, "need_balance"), reply_markup=main_back_keyboard(cq.from_user.id))
     pname = product_name(cat_key, item, lang(cq.from_user.id))
@@ -1804,11 +1815,12 @@ async def cb_confirm(cq: CallbackQuery):
 
     if b <= 0:
         return await safe_edit(cq, txt(cq.from_user.id, "need_balance"), reply_markup=main_back_keyboard(cq.from_user.id))
-    if b < get_min_order(cq.from_user.id):
-        return await cq.answer(f"Minimum order is {get_min_order(cq.from_user.id):.0f} USDT", show_alert=True)
 
     price_val = float(item["price"] or 0.0)
     final, code, percent = apply_discount(cq.from_user.id, price_val)
+
+    if final < get_min_order(cq.from_user.id):
+        return await cq.answer(f"Minimum order is {get_min_order(cq.from_user.id):.0f} USDT", show_alert=True)
 
     if b < final:
         return await cq.answer("Not enough balance", show_alert=True)
@@ -1875,6 +1887,10 @@ async def reply_keyboard_and_states(m: Message):
         await m.answer(inv, reply_markup=paid_only_keyboard(m.from_user.id, pid))
         if state["method"] == "bep20":
             await m.answer(USDT_BEP20_ADDRESS)
+        elif state["method"] == "trc20":
+            await m.answer(USDT_TRC20_ADDRESS)
+        elif state["method"] == "bybit":
+            await m.answer(BYBIT_ID)
         await notify_admins(
             f"Top Up Request #{pid}\n\n"
             f"User ID: {m.from_user.id}\n"
@@ -1901,7 +1917,11 @@ async def reply_keyboard_and_states(m: Message):
         unit = float(item["price"] or 0.0)
         total = round(unit * qty, 2)
         final, code, percent = apply_discount(m.from_user.id, total)
+        if final < get_min_order(m.from_user.id):
+            PENDING_QUANTITY.pop(m.from_user.id, None)
+            return await m.answer(txt(m.from_user.id, "min_order", min_order=get_min_order(m.from_user.id)), reply_markup=menu_reply_keyboard(m.from_user.id))
         if balance <= 0 or balance < final:
+            PENDING_QUANTITY.pop(m.from_user.id, None)
             return await m.answer(txt(m.from_user.id, "need_balance"), reply_markup=menu_reply_keyboard(m.from_user.id))
         pname = pretty_product_label(state["cat_key"], item)
         with conn() as c:
