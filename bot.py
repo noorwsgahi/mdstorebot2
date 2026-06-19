@@ -9,7 +9,7 @@ from typing import Any, Dict, List, Optional
 from aiogram import Bot, Dispatcher, F
 from aiogram.client.session.aiohttp import AiohttpSession
 from aiogram.filters import Command, CommandStart
-from aiogram.types import CallbackQuery, FSInputFile, InlineKeyboardButton, InlineKeyboardMarkup, Message, WebAppInfo
+from aiogram.types import CallbackQuery, FSInputFile, InlineKeyboardButton, InlineKeyboardMarkup, Message, WebAppInfo, ReplyKeyboardMarkup, KeyboardButton
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -23,6 +23,8 @@ CHANNEL_URL = os.getenv("CHANNEL_URL", "https://t.me/MD_WEBSITE")
 WEB_APP_URL = os.getenv("WEB_APP_URL", "https://mdgiftshop-94hvjt93.manus.space/")
 WELCOME_PHOTO_PATH = os.getenv("WELCOME_PHOTO_PATH", "photo_2026-06-13_18-11-52.jpg")
 BYBIT_ID = os.getenv("BYBIT_ID", "524739312")
+BINANCE_ID = os.getenv("BINANCE_ID", "1254699995")
+BINANCE_NOTE = os.getenv("BINANCE_NOTE", "E7988E77-166F-4C84-A")
 USDT_BEP20_ADDRESS = os.getenv("USDT_BEP20_ADDRESS", "0xA2E0c2eC432953Dd2F832488a1EC061e6e761361")
 MIN_ORDER = float(os.getenv("MIN_ORDER_USDT", "50"))
 
@@ -39,6 +41,10 @@ PRODUCTS = json.loads(PRODUCTS_PATH.read_text(encoding="utf-8"))
 session = AiohttpSession()
 bot = Bot(BOT_TOKEN, session=session)
 dp = Dispatcher()
+
+# Simple in-memory states for quantity purchase and top-up amount entry.
+PENDING_QUANTITY: Dict[int, Dict[str, Any]] = {}
+PENDING_TOPUP: Dict[int, Dict[str, Any]] = {}
 
 LANGS = {"ar": "العربية", "en": "English", "ru": "Русский"}
 
@@ -76,7 +82,7 @@ T = {
         "ru": "Добро пожаловать в MD STORE\nМаркетплейс цифровых подарочных карт.\n\nMD STORE поставляет цифровые карты и пополнения игр для клиентов и реселлеров.\nДля крупных заказов и долгосрочного сотрудничества свяжитесь с поддержкой.\n\nВыберите пункт меню:",
     },
     "shop": {"ar": "SHOP", "en": "SHOP", "ru": "SHOP"},
-    "products": {"ar": "SHOP", "en": "SHOP", "ru": "SHOP"},
+    "products": {"ar": "🛒 Our Products", "en": "🛒 Our Products", "ru": "🛒 Our Products"},
     "special_offers": {"ar": "🎁 العروض", "en": "🎁 Special Offers", "ru": "🎁 Акции"},
     "best_sellers": {"ar": "⭐ الاكثر مبيعا", "en": "⭐ Best Sellers", "ru": "⭐ Хиты продаж"},
     "reviews": {"ar": "المراجعات", "en": "Reviews", "ru": "Отзывы"},
@@ -119,6 +125,15 @@ T = {
         "ru": "Для пополнения баланса отправьте оплату, затем нажмите: Я оплатил.\nПосле этого свяжитесь с поддержкой и отправьте скриншот или hash/ссылку платежа.\n\nUSDT BEP20:\n{wallet}\n\nBybit ID:\n{bybit}\n\nПоддержка: {support}",
     },
     "i_paid": {"ar": "تم الدفع", "en": "I Have Paid", "ru": "Я оплатил"},
+    "pay_bep20": {"ar": "💎 USDT(BEP20)", "en": "💎 USDT(BEP20)", "ru": "💎 USDT(BEP20)"},
+    "pay_binance": {"ar": "🪙 Binance ID", "en": "🪙 Binance ID", "ru": "🪙 Binance ID"},
+    "pay_bybit": {"ar": "🔑 BYBIT", "en": "🔑 BYBIT", "ru": "🔑 BYBIT"},
+    "enter_amount": {
+        "ar": "📝 Enter the amount in USD:-\n🪶 Example: 20.50\n\n❌ If you want to cancel the process send /cancel",
+        "en": "📝 Enter the amount in USD:-\n🪶 Example: 20.50\n\n❌ If you want to cancel the process send /cancel",
+        "ru": "📝 Enter the amount in USD:-\n🪶 Example: 20.50\n\n❌ If you want to cancel the process send /cancel",
+    },
+    "cancelled": {"ar": "Cancelled.", "en": "Cancelled.", "ru": "Отменено."},
     "paid_sent": {
         "ar": "تم إرسال إشعار الدفع إلى الإدارة.\nيرجى إرسال لقطة الشاشة أو Hash الدفع إلى الدعم.",
         "en": "Your payment notice has been sent to admin.\nPlease send the screenshot or payment hash to support.",
@@ -256,6 +271,8 @@ def init_db():
             c.execute("ALTER TABLE payment_requests ADD COLUMN amount REAL DEFAULT 0")
         if "updated_at" not in pay_cols:
             c.execute("ALTER TABLE payment_requests ADD COLUMN updated_at TEXT")
+        if "method" not in pay_cols:
+            c.execute("ALTER TABLE payment_requests ADD COLUMN method TEXT DEFAULT 'bep20'")
 
         seed_product_prices(c, discount_percent=5.0)
 
@@ -529,6 +546,100 @@ def styled_button(text: str, *, style: Optional[str] = None, icon_custom_emoji_i
         data["icon_custom_emoji_id"] = icon_custom_emoji_id
     return InlineKeyboardButton(**data)
 
+def menu_reply_keyboard(uid: int) -> ReplyKeyboardMarkup:
+    l = lang(uid)
+    return ReplyKeyboardMarkup(
+        keyboard=[
+            [KeyboardButton(text=T["products"][l])],
+            [KeyboardButton(text=T["topup"][l]), KeyboardButton(text=T["balance"][l])],
+            [KeyboardButton(text=T["orders"][l]), KeyboardButton(text=T["cart"][l])],
+            [KeyboardButton(text=T["special_offers"][l]), KeyboardButton(text=T["best_sellers"][l])],
+            [KeyboardButton(text=T["favorites"][l]), KeyboardButton(text=T["profile"][l])],
+            [KeyboardButton(text=T["referrals"][l]), KeyboardButton(text=T["language"][l])],
+            [KeyboardButton(text=T["support"][l]), KeyboardButton(text=T["channel"][l])],
+        ],
+        resize_keyboard=True,
+        is_persistent=True,
+    )
+
+def display_stock(cat_key: str, item: Dict[str, Any]) -> int:
+    raw = item.get("stock", 0)
+    try:
+        raw = int(raw)
+    except Exception:
+        raw = 0
+    # For display, show strong available stock as requested.
+    return max(raw, 8000)
+
+def pretty_product_label(cat_key: str, item: Dict[str, Any]) -> str:
+    label = str(item.get("label", "")).strip()
+    lower = f"{cat_key} {label}".lower()
+    if "pubg" in lower and "uc" in lower:
+        amount = label.split()[0]
+        if amount.isdigit():
+            return f"{amount} UC 1Year Stockable"
+    return label
+
+def topup_methods_keyboard(uid: int) -> InlineKeyboardMarkup:
+    l = lang(uid)
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [styled_button(text=T["pay_bep20"][l], callback_data="paymethod:bep20", style="primary"),
+         styled_button(text=T["pay_binance"][l], callback_data="paymethod:binance", style="primary")],
+        [styled_button(text=T["pay_bybit"][l], callback_data="paymethod:bybit", style="primary"),
+         styled_button(text=T["back"][l], callback_data="main", style="danger")],
+    ])
+
+def paid_only_keyboard(uid: int, payment_id: Optional[int] = None) -> InlineKeyboardMarkup:
+    l = lang(uid)
+    paid_cb = f"paid:{payment_id}" if payment_id else "paid"
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [styled_button(text=f"✅ {T['i_paid'][l]}", callback_data=paid_cb, style="success")],
+        [styled_button(text=SUPPORT_USERNAME, url=f"https://t.me/{SUPPORT_USERNAME.replace('@','')}", style="success", icon_custom_emoji_id=CUSTOM_EMOJI["support"])],
+        [styled_button(text=T["back"][l], callback_data="main", style="danger")],
+    ])
+
+def balance_info_message(uid: int) -> str:
+    u = user(uid)
+    b = float(u["balance"]) if u else 0.0
+    name = (u["first_name"] if u and "first_name" in u.keys() else "") or "Customer"
+    code, discount = get_discount(uid)
+    text = (
+        "💵 Your Balance Information\n\n"
+        f"Hello, {name}! Here’s your current balance:\n\n"
+        f"🔹 Telegram ID: {uid}\n"
+        f"🔹 Current Balance: {b:.3f} $\n\n"
+        "✨ What would you like to do next?\n"
+        "You can top up your balance using one of the following methods:"
+    )
+    if code:
+        text += f"\n\nCoupon: {code} ({discount:.0f}%)"
+    return text
+
+def invoice_message(method: str, amount: float) -> str:
+    amount_text = f"{amount:.2f}".rstrip("0").rstrip(".")
+    if method == "binance":
+        return (
+            f"🔑 UID: {BINANCE_ID}\n\n"
+            "Please send the amount to this UID and include the note\n\n"
+            f"{BINANCE_NOTE}\n\n"
+            "Make sure you are sending only USDT 💵. After that, click the '✅ I Have Paid' button."
+        )
+    if method == "bybit":
+        return (
+            f"🔑 BYBIT ID: {BYBIT_ID}\n\n"
+            f"Please send exactly {amount_text} USDT to this BYBIT ID.\n\n"
+            "Make sure you are sending only USDT 💵. After that, click the '✅ I Have Paid' button."
+        )
+    return (
+        f"✅ Kindly deposit exactly {amount_text} USDT (BSC) to the address below:\n\n"
+        "💼\n\n"
+        f"{USDT_BEP20_ADDRESS}\n\n"
+        "👆 Tap to copy\n\n"
+        "⏰ This invoice will expire in 20 minutes.\n"
+        "⏬ Kindly complete the deposit of exact amount within this time frame.\n\n"
+        "🕑 This message will be deleted after 20 minutes. 🗑️"
+    )
+
 def kb_lang():
     return InlineKeyboardMarkup(inline_keyboard=[
         [styled_button(text=v, callback_data=f"lang:{k}", style="primary")]
@@ -577,7 +688,12 @@ def kb_items(uid, cat_key):
     l = lang(uid)
     rows = []
     for item in iter_items(cat_key):
-        rows.append([styled_button(text=f"{item['label']} - {price_text(item['price'])}", callback_data=f"view:{cat_key}:{item['id']}", style="primary")])
+        label = pretty_product_label(cat_key, item)
+        rows.append([styled_button(
+            text=f"{label} | {price_text(item['price'])} | {display_stock(cat_key, item)}",
+            callback_data=f"view:{cat_key}:{item['id']}",
+            style="primary"
+        )])
     rows.append([styled_button(text=T["back"][l], callback_data="shop", style="danger")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
@@ -607,15 +723,15 @@ def main_back_keyboard(uid):
     l = lang(uid)
     return InlineKeyboardMarkup(inline_keyboard=[[styled_button(text=T["main"][l], callback_data="main", style="primary")]])
 
-def create_payment_request(uid: int, username: str = ""):
+def create_payment_request(uid: int, username: str = "", amount: float = 0.0, method: str = "bep20"):
     now = datetime.utcnow()
     expires = now + timedelta(minutes=20)
     with conn() as c:
         # أي عملية قديمة قيد الانتظار لنفس المستخدم تصبح منتهية عند إنشاء عملية جديدة.
         c.execute("UPDATE payment_requests SET status='expired', updated_at=? WHERE user_id=? AND status='pending'", (now.isoformat(), uid))
         cur = c.execute(
-            "INSERT INTO payment_requests(user_id, username, status, wallet, created_at, expires_at, updated_at) VALUES(?,?,?,?,?,?,?)",
-            (uid, username or "", "pending", USDT_BEP20_ADDRESS, now.isoformat(), expires.isoformat(), now.isoformat())
+            "INSERT INTO payment_requests(user_id, username, status, wallet, amount, method, created_at, expires_at, updated_at) VALUES(?,?,?,?,?,?,?,?,?)",
+            (uid, username or "", "pending", USDT_BEP20_ADDRESS, float(amount or 0), method, now.isoformat(), expires.isoformat(), now.isoformat())
         )
         pid = cur.lastrowid
         c.commit()
@@ -695,12 +811,12 @@ async def send_welcome_message(m: Message):
                 await m.answer_photo(
                     FSInputFile(photo_path),
                     caption=txt(m.from_user.id, "welcome"),
-                    reply_markup=kb_main(m.from_user.id),
+                    reply_markup=menu_reply_keyboard(m.from_user.id),
                 )
                 return
             except Exception:
                 continue
-    await m.answer(txt(m.from_user.id, "welcome"), reply_markup=kb_main(m.from_user.id))
+    await m.answer(txt(m.from_user.id, "welcome"), reply_markup=menu_reply_keyboard(m.from_user.id))
 
 @dp.message(CommandStart())
 async def start(m: Message):
@@ -1053,7 +1169,8 @@ async def cb_lang(cq: CallbackQuery):
         return
     ensure(cq.from_user)
     set_lang(cq.from_user.id, cq.data.split(":")[1])
-    await safe_edit(cq, txt(cq.from_user.id, "welcome"), reply_markup=kb_main(cq.from_user.id))
+    await safe_edit(cq, txt(cq.from_user.id, "welcome"), reply_markup=None)
+    await cq.message.answer(T["main"][lang(cq.from_user.id)], reply_markup=menu_reply_keyboard(cq.from_user.id))
     await cq.answer()
 
 @dp.callback_query(F.data == "choose_lang")
@@ -1067,13 +1184,18 @@ async def cb_choose_lang(cq: CallbackQuery):
 async def cb_main(cq: CallbackQuery):
     if await block_if_banned(cq):
         return
-    await safe_edit(cq, txt(cq.from_user.id, "welcome"), reply_markup=kb_main(cq.from_user.id))
+    PENDING_TOPUP.pop(cq.from_user.id, None)
+    PENDING_QUANTITY.pop(cq.from_user.id, None)
+    await safe_edit(cq, txt(cq.from_user.id, "welcome"), reply_markup=None)
+    await cq.message.answer(T["main"][lang(cq.from_user.id)], reply_markup=menu_reply_keyboard(cq.from_user.id))
     await cq.answer()
 
 @dp.callback_query(F.data == "shop")
 async def cb_shop(cq: CallbackQuery):
     if await block_if_banned(cq):
         return
+    PENDING_TOPUP.pop(cq.from_user.id, None)
+    PENDING_QUANTITY.pop(cq.from_user.id, None)
     await safe_edit(cq, txt(cq.from_user.id, "category_text"), reply_markup=kb_cats(cq.from_user.id))
     await cq.answer()
 
@@ -1081,11 +1203,24 @@ async def cb_shop(cq: CallbackQuery):
 async def cb_topup(cq: CallbackQuery):
     if await block_if_banned(cq):
         return
+    PENDING_TOPUP.pop(cq.from_user.id, None)
     ensure(cq.from_user)
     expire_old_payment_requests()
-    pid, expires = create_payment_request(cq.from_user.id, cq.from_user.username or "")
-    await safe_edit(cq, payment_message(cq.from_user.id, pid, expires), reply_markup=payment_keyboard(cq.from_user.id, pid))
-    await cq.answer("Payment request created")
+    await safe_edit(cq, balance_info_message(cq.from_user.id), reply_markup=topup_methods_keyboard(cq.from_user.id))
+    await cq.answer()
+
+@dp.callback_query(F.data.startswith("paymethod:"))
+async def cb_paymethod(cq: CallbackQuery):
+    if await block_if_banned(cq):
+        return
+    method = cq.data.split(":", 1)[1]
+    if method not in {"bep20", "binance", "bybit"}:
+        return await cq.answer("Unavailable", show_alert=True)
+    PENDING_TOPUP[cq.from_user.id] = {"method": method}
+    await safe_edit(cq, txt(cq.from_user.id, "enter_amount"), reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+        [styled_button(text=T["back"][lang(cq.from_user.id)], callback_data="topup", style="danger")]
+    ]))
+    await cq.answer()
 
 @dp.callback_query(F.data.startswith("paid"))
 async def cb_paid(cq: CallbackQuery):
@@ -1114,8 +1249,13 @@ async def cb_paid(cq: CallbackQuery):
     with conn() as c:
         c.execute("UPDATE payment_requests SET status='paid', updated_at=? WHERE id=?", (datetime.utcnow().isoformat(), pid))
         c.commit()
+    amount_info = ""
+    try:
+        amount_info = f"\nAmount: {float(row['amount'] or 0):.2f} USDT\nMethod: {row['method'] or 'bep20'}"
+    except Exception:
+        pass
     await notify_admins(
-        f"Payment Notice #{pid}\n\nUser ID: {cq.from_user.id}\nUsername: @{cq.from_user.username}\nStatus: Paid / Waiting Review\nWallet: {USDT_BEP20_ADDRESS}\n\nAsk the user for screenshot/hash if needed, then add balance manually after verification."
+        f"Payment Notice #{pid}\n\nUser ID: {cq.from_user.id}\nUsername: @{cq.from_user.username}\nStatus: Paid / Waiting Review{amount_info}\nWallet: {USDT_BEP20_ADDRESS}\n\nAsk the user for screenshot/hash if needed, then add balance manually after verification."
     )
     await safe_edit(cq, txt(cq.from_user.id, "paid_sent"), reply_markup=main_back_keyboard(cq.from_user.id))
     await cq.answer()
@@ -1137,19 +1277,8 @@ async def cb_cancel_payment(cq: CallbackQuery):
 async def cb_copy_usdt(cq: CallbackQuery):
     if await block_if_banned(cq):
         return
-    expire_old_payment_requests()
-    with conn() as c:
-        row = c.execute("SELECT * FROM payment_requests WHERE user_id=? AND status='pending' ORDER BY id DESC LIMIT 1", (cq.from_user.id,)).fetchone()
-    if not row:
-        pid, expires = create_payment_request(cq.from_user.id, cq.from_user.username or "")
-    else:
-        pid, expires = int(row["id"]), datetime.fromisoformat(row["expires_at"])
-    await cq.answer("USDT address sent below")
-    await cq.message.answer(
-        f"Top Up Request #{pid}\n\nUSDT BEP20 Address:\n\n`{USDT_BEP20_ADDRESS}`\n\nYou have 20 minutes to pay. Tap and hold the address to copy it.",
-        parse_mode="Markdown",
-        reply_markup=payment_keyboard(cq.from_user.id, pid)
-    )
+    await cq.message.answer(USDT_BEP20_ADDRESS)
+    await cq.answer()
 
 @dp.callback_query(F.data == "faq")
 async def cb_faq(cq: CallbackQuery):
@@ -1217,17 +1346,8 @@ async def cb_referrals(cq: CallbackQuery):
 async def cb_balance(cq: CallbackQuery):
     if await block_if_banned(cq):
         return
-    u = user(cq.from_user.id)
-    b = float(u["balance"]) if u else 0.0
-    code, discount = get_discount(cq.from_user.id)
-    text = txt(cq.from_user.id, "wallet", balance=b)
-    if code:
-        text += f"\nCoupon: {code} ({discount:.0f}%)"
-    text += "\n\n" + txt(cq.from_user.id, "coupon_help")
-    await safe_edit(cq, text, reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-        [styled_button(text=T["topup"][lang(cq.from_user.id)], callback_data="topup", style="primary", icon_custom_emoji_id=CUSTOM_EMOJI["topup"])],
-        [styled_button(text=T["back"][lang(cq.from_user.id)], callback_data="main", style="danger")]
-    ]))
+    ensure(cq.from_user)
+    await safe_edit(cq, balance_info_message(cq.from_user.id), reply_markup=topup_methods_keyboard(cq.from_user.id))
     await cq.answer()
 
 @dp.callback_query(F.data == "support")
@@ -1371,7 +1491,7 @@ async def cb_cat(cq: CallbackQuery):
     if is_hidden_category(cat_key, cat):
         await cq.answer("Product is unavailable", show_alert=True)
         return
-    await safe_edit(cq, cat_name(cat_key, lang(cq.from_user.id)), reply_markup=kb_items(cq.from_user.id, cat_key))
+    await safe_edit(cq, "✨ Here are some amazing products we have for you:", reply_markup=kb_items(cq.from_user.id, cat_key))
     await cq.answer()
 
 @dp.callback_query(F.data.startswith("view:"))
@@ -1383,7 +1503,14 @@ async def cb_view(cq: CallbackQuery):
     if not item:
         return await cq.answer("Product not found", show_alert=True)
     l = lang(cq.from_user.id)
-    text = f"{product_name(cat_key, item, l)}\n\nPrice: {price_text(item['price'])}\nValidity: 1 Year\nDelivery: Instant"
+    name = pretty_product_label(cat_key, item)
+    text = (
+        f"🛍️ {name}\n\n"
+        f"- ID: {pid}\n"
+        "- Description: N/A\n"
+        f"- Price: {price_text(item['price'])}\n"
+        f"- In Stock: {display_stock(cat_key, item)} items available"
+    )
     await safe_edit(cq, text, reply_markup=kb_product_actions(cq.from_user.id, cat_key, pid))
     await cq.answer()
 
@@ -1542,30 +1669,16 @@ async def cb_buy(cq: CallbackQuery):
     if not item:
         return await cq.answer("Product not found", show_alert=True)
 
-    u = user(cq.from_user.id)
-    b = float(u["balance"]) if u else 0.0
-    l = lang(cq.from_user.id)
-
-    if b <= 0:
-        return await safe_edit(cq, txt(cq.from_user.id, "need_balance"), reply_markup=main_back_keyboard(cq.from_user.id))
-    if b < get_min_order(cq.from_user.id):
-        return await safe_edit(cq, txt(cq.from_user.id, "min_order", min_order=get_min_order(cq.from_user.id)), reply_markup=main_back_keyboard(cq.from_user.id))
-
-    price_val = float(item["price"] or 0.0)
-    final, code, percent = apply_discount(cq.from_user.id, price_val)
-
-    if b < final:
-        return await safe_edit(cq, txt(cq.from_user.id, "need_balance"), reply_markup=main_back_keyboard(cq.from_user.id))
-
-    pname = product_name(cat_key, item, l)
-    price_line = f"{final:.2f} USDT"
-    if code:
-        price_line += f"\nCoupon: {code} - {percent:.0f}%"
-
-    text = f"{T['confirm'][l]}\n\nProduct: {pname}\nPrice: {price_line}\nBalance: {b:.2f} USDT"
+    stock = display_stock(cat_key, item)
+    name = pretty_product_label(cat_key, item)
+    PENDING_QUANTITY[cq.from_user.id] = {"cat_key": cat_key, "pid": pid, "max": stock}
+    text = (
+        f"You are purchasing {name}\n\n"
+        f"📝 Enter a quantity between 1 and {stock}:\n\n"
+        "❌ If you want to cancel the process, send /cancel"
+    )
     await safe_edit(cq, text, reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-        [styled_button(text=T["confirm"][l], callback_data=f"confirm:{cat_key}:{pid}", style="success")],
-        [styled_button(text=T["back"][l], callback_data=f"view:{cat_key}:{pid}", style="danger")]
+        [styled_button(text=T["back"][lang(cq.from_user.id)], callback_data=f"view:{cat_key}:{pid}", style="danger")]
     ]))
     await cq.answer()
 
@@ -1638,6 +1751,183 @@ async def cb_confirm(cq: CallbackQuery):
     await create_order(cq, pname, final)
     await safe_edit(cq, txt(cq.from_user.id, "order_done"), reply_markup=main_back_keyboard(cq.from_user.id))
     await cq.answer()
+
+@dp.message(Command("cancel"))
+async def cancel_current_process(m: Message):
+    ensure(m.from_user)
+    PENDING_QUANTITY.pop(m.from_user.id, None)
+    PENDING_TOPUP.pop(m.from_user.id, None)
+    await m.answer(txt(m.from_user.id, "cancelled"), reply_markup=menu_reply_keyboard(m.from_user.id))
+
+async def open_main_from_text(m: Message, callback_name: str):
+    # Helper for reply keyboard navigation.
+    fake = type("FakeCQ", (), {})()
+
+@dp.message(F.text)
+async def reply_keyboard_and_states(m: Message):
+    ensure(m.from_user)
+    if await block_if_banned(m):
+        return
+    text = (m.text or "").strip()
+    l = lang(m.from_user.id)
+
+    if text == "/cancel":
+        PENDING_QUANTITY.pop(m.from_user.id, None)
+        PENDING_TOPUP.pop(m.from_user.id, None)
+        return await m.answer(txt(m.from_user.id, "cancelled"), reply_markup=menu_reply_keyboard(m.from_user.id))
+
+    if m.from_user.id in PENDING_TOPUP:
+        state = PENDING_TOPUP.pop(m.from_user.id)
+        try:
+            amount = float(text.replace(",", "."))
+            if amount <= 0:
+                raise ValueError
+        except Exception:
+            PENDING_TOPUP[m.from_user.id] = state
+            return await m.answer(txt(m.from_user.id, "enter_amount"))
+        expire_old_payment_requests()
+        pid, expires = create_payment_request(m.from_user.id, m.from_user.username or "", amount=amount, method=state["method"])
+        inv = invoice_message(state["method"], amount)
+        await m.answer(inv, reply_markup=paid_only_keyboard(m.from_user.id, pid))
+        if state["method"] == "bep20":
+            await m.answer(USDT_BEP20_ADDRESS)
+        await notify_admins(
+            f"Top Up Request #{pid}\n\n"
+            f"User ID: {m.from_user.id}\n"
+            f"Username: @{m.from_user.username}\n"
+            f"Method: {state['method']}\n"
+            f"Amount: {amount:.2f} USDT"
+        )
+        return
+
+    if m.from_user.id in PENDING_QUANTITY:
+        state = PENDING_QUANTITY.pop(m.from_user.id)
+        try:
+            qty = int(text)
+            if qty < 1 or qty > int(state["max"]):
+                raise ValueError
+        except Exception:
+            PENDING_QUANTITY[m.from_user.id] = state
+            return await m.answer(f"Please enter a quantity between 1 and {state['max']}.")
+        item = get_item(state["cat_key"], state["pid"])
+        if not item:
+            return await m.answer("Product not found.", reply_markup=menu_reply_keyboard(m.from_user.id))
+        u = user(m.from_user.id)
+        balance = float(u["balance"]) if u else 0.0
+        unit = float(item["price"] or 0.0)
+        total = round(unit * qty, 2)
+        final, code, percent = apply_discount(m.from_user.id, total)
+        if balance <= 0 or balance < final:
+            return await m.answer(txt(m.from_user.id, "need_balance"), reply_markup=menu_reply_keyboard(m.from_user.id))
+        pname = pretty_product_label(state["cat_key"], item)
+        with conn() as c:
+            c.execute("UPDATE users SET balance=balance-? WHERE user_id=?", (final, m.from_user.id))
+            cur = c.execute(
+                "INSERT INTO orders(user_id, username, product, price, status, gift_to, created_at) VALUES(?,?,?,?,?,?,?)",
+                (m.from_user.id, m.from_user.username or "", f"{pname} x{qty}", final, "pending", "", datetime.utcnow().isoformat())
+            )
+            oid = cur.lastrowid
+            c.commit()
+        add_referral_commission(m.from_user.id, final)
+        await notify_admins(
+            f"New Order #{oid}\n\n"
+            f"User ID: {m.from_user.id}\n"
+            f"Username: @{m.from_user.username}\n"
+            f"Product: {pname}\n"
+            f"Quantity: {qty}\n"
+            f"Amount: {final:.2f} USDT"
+        )
+        return await m.answer(txt(m.from_user.id, "order_done"), reply_markup=menu_reply_keyboard(m.from_user.id))
+
+    # Reply keyboard navigation
+    if text == T["products"][l] or text.lower().strip() in {"shop", "our products"}:
+        return await m.answer(txt(m.from_user.id, "category_text"), reply_markup=kb_cats(m.from_user.id))
+    if text == T["balance"][l] or text == T["topup"][l]:
+        return await m.answer(balance_info_message(m.from_user.id), reply_markup=topup_methods_keyboard(m.from_user.id))
+    if text == T["orders"][l]:
+        with conn() as c:
+            rows = c.execute("SELECT * FROM orders WHERE user_id=? ORDER BY id DESC LIMIT 10", (m.from_user.id,)).fetchall()
+        if not rows:
+            return await m.answer(txt(m.from_user.id, "no_orders"), reply_markup=menu_reply_keyboard(m.from_user.id))
+        msg = "My Orders\n\n"
+        for r in rows:
+            msg += f"#{r['id']} | {r['product']}\nAmount: {r['price']:.2f} USDT\nStatus: {r['status']}\n\n"
+        return await m.answer(msg, reply_markup=menu_reply_keyboard(m.from_user.id))
+    if text == T["cart"][l]:
+        with conn() as c:
+            rows = c.execute("SELECT * FROM cart WHERE user_id=? ORDER BY id", (m.from_user.id,)).fetchall()
+        if not rows:
+            return await m.answer(txt(m.from_user.id, "empty_cart"), reply_markup=menu_reply_keyboard(m.from_user.id))
+        msg = "Cart\n\n"
+        total = 0.0
+        for r in rows:
+            item = get_item(r["cat_key"], r["product_id"])
+            if item:
+                total += float(item["price"] or 0.0)
+                msg += f"{pretty_product_label(r['cat_key'], item)} - {price_text(item['price'])}\n"
+        msg += f"\nTotal: {total:.2f} USDT"
+        return await m.answer(msg, reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+            [styled_button(text=T["confirm"][l], callback_data="checkout", style="success")],
+            [styled_button(text=T["back"][l], callback_data="main", style="danger")]
+        ]))
+    if text == T["language"][l]:
+        return await m.answer(T["choose_lang"][l], reply_markup=kb_lang())
+    if text == T["support"][l]:
+        return await m.answer(txt(m.from_user.id, "pay", wallet=USDT_BEP20_ADDRESS, bybit=BYBIT_ID, support=SUPPORT_USERNAME), reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+            [styled_button(text=SUPPORT_USERNAME, url=f"https://t.me/{SUPPORT_USERNAME.replace('@','')}", style="success", icon_custom_emoji_id=CUSTOM_EMOJI["support"])],
+            [styled_button(text=T["channel"][l], url=CHANNEL_URL, style="primary", icon_custom_emoji_id=CUSTOM_EMOJI["channel"])],
+        ]))
+    if text == T["profile"][l]:
+        u = user(m.from_user.id)
+        invited, earnings = referral_stats(m.from_user.id)
+        b = float(u["balance"]) if u else 0.0
+        return await m.answer(
+            "Profile\n\n"
+            f"ID: {m.from_user.id}\n"
+            f"Username: @{m.from_user.username}\n"
+            f"Balance: {b:.2f} USDT\n"
+            f"Invited users: {invited}\n"
+            f"Referral earnings: {earnings:.2f} USDT",
+            reply_markup=menu_reply_keyboard(m.from_user.id)
+        )
+    if text == T["special_offers"][l]:
+        return await m.answer("Special Offers\n\nHOT DEAL: Razer Gold and PUBG UC are available with trader prices.\nCoupon: WELCOME5", reply_markup=menu_reply_keyboard(m.from_user.id))
+    if text == T["best_sellers"][l]:
+        return await m.answer("Best Sellers\n\nRazer Gold\nPUBG UC\nSteam USA\nPlayStation USA\niTunes USA\nRoblox Gift Cards", reply_markup=menu_reply_keyboard(m.from_user.id))
+    if text == T["favorites"][l]:
+        with conn() as c:
+            rows = c.execute("SELECT * FROM favorites WHERE user_id=?", (m.from_user.id,)).fetchall()
+        if not rows:
+            return await m.answer(txt(m.from_user.id, "empty_fav"), reply_markup=menu_reply_keyboard(m.from_user.id))
+        msg = "Favorites\n\n"
+        for r in rows:
+            item = get_item(r["cat_key"], r["product_id"])
+            if item:
+                msg += f"{pretty_product_label(r['cat_key'], item)} - {price_text(item['price'])}\n"
+        return await m.answer(msg, reply_markup=menu_reply_keyboard(m.from_user.id))
+    if text == T["referrals"][l]:
+        invited, earnings = referral_stats(m.from_user.id)
+        me = await bot.get_me()
+        ref_link = f"https://t.me/{me.username}?start=ref_{m.from_user.id}"
+        return await m.answer(
+            "Referral Program\n\n"
+            f"Your referral link:\n{ref_link}\n\n"
+            f"Invited users: {invited}\n"
+            f"Referral earnings: {earnings:.2f} USDT",
+            reply_markup=menu_reply_keyboard(m.from_user.id)
+        )
+    if text == T["channel"][l]:
+        return await m.answer(CHANNEL_URL, reply_markup=menu_reply_keyboard(m.from_user.id))
+
+    # Not a menu/state message: let the admin-forward handler below process it.
+    content = m.text or m.caption or ""
+    await notify_admins(
+        f"User Message\n\n"
+        f"ID: {m.from_user.id}\n"
+        f"Username: @{m.from_user.username}\n"
+        f"Name: {m.from_user.first_name}\n\n"
+        f"Message:\n{content}"
+    )
 
 @dp.message()
 async def forward_user_messages_to_admin(m: Message):
