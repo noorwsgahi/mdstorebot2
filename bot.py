@@ -26,43 +26,26 @@ BYBIT_ID = os.getenv("BYBIT_ID", "524739312")
 USDT_BEP20_ADDRESS = os.getenv("USDT_BEP20_ADDRESS", "0xA2E0c2eC432953Dd2F832488a1EC061e6e761361")
 MIN_ORDER = float(os.getenv("MIN_ORDER_USDT", "50"))
 
-DB_PATH_RAW = os.getenv("DATABASE_PATH", "md_store_bot.db")
-DB = str(Path(DB_PATH_RAW) if Path(DB_PATH_RAW).is_absolute() else BASE_DIR / DB_PATH_RAW)
+SPECIAL_MIN_ORDERS = {
+    7781514279: 100.0,
+    358930912: 100.0,
+}
+
+def get_min_order(user_id):
+    return SPECIAL_MIN_ORDERS.get(user_id, MIN_ORDER)
+DB = os.getenv("DATABASE_PATH", "md_store_bot.db")
 ADMIN_IDS = {int(x) for x in os.getenv("ADMIN_IDS", "7504221023").replace(" ", "").split(",") if x.isdigit()}
 
 if not BOT_TOKEN:
     raise RuntimeError("BOT_TOKEN missing in .env or Railway Variables")
 
-PRODUCTS_PATH = BASE_DIR / "products.json"
-PRODUCTS = json.loads(PRODUCTS_PATH.read_text(encoding="utf-8"))
+PRODUCTS = json.loads(Path("products.json").read_text(encoding="utf-8"))
 
 session = AiohttpSession()
 bot = Bot(BOT_TOKEN, session=session)
 dp = Dispatcher()
 
 LANGS = {"ar": "العربية", "en": "English", "ru": "Русский"}
-
-# Custom emoji IDs used in Telegram colored buttons.
-# These IDs were provided from Telegram RawDataBot/custom emoji entities.
-CUSTOM_EMOJI = {
-    "shop": "5309801015015405183",
-    "topup": "5310177404474390190",
-    "balance": "5276137490846075469",
-    "cart_orders": "5443143274061642333",
-    "profile": "5242442819573927209",
-    "support": "5440411975509096877",
-    "channel": "5364125616801073577",
-    "razer": "5262644026451960385",
-    "pubg_uc": "5314544952422704045",
-    "steam": "5318801707394695066",
-    "playstation": "5363934885893389858",
-    "roblox": "5388921730016240894",
-    "itunes": "5332512686112520612",
-}
-
-# Hide products that should no longer appear in the bot.
-# iTunes Gift Cards remain available; only iTunes Accounts are hidden.
-HIDDEN_PRODUCT_KEYWORDS = ("yalla", "ludo", "itunes account", "itunes accounts")
 
 T = {
     "choose_lang": {
@@ -75,25 +58,25 @@ T = {
         "en": "Welcome to MD STORE\nDigital gift card marketplace.\n\nMD STORE supplies digital cards and game top-ups for traders and resellers.\nFor large quantities and long-term cooperation, contact support.\n\nChoose from the menu:",
         "ru": "Добро пожаловать в MD STORE\nМаркетплейс цифровых подарочных карт.\n\nMD STORE поставляет цифровые карты и пополнения игр для клиентов и реселлеров.\nДля крупных заказов и долгосрочного сотрудничества свяжитесь с поддержкой.\n\nВыберите пункт меню:",
     },
-    "shop": {"ar": "SHOP", "en": "SHOP", "ru": "SHOP"},
-    "products": {"ar": "SHOP", "en": "SHOP", "ru": "SHOP"},
+    "shop": {"ar": "🛍 المتجر", "en": "🛍 Shop", "ru": "🛍 Магазин"},
+    "products": {"ar": "المنتجات", "en": "Products", "ru": "Товары"},
     "special_offers": {"ar": "🎁 العروض", "en": "🎁 Special Offers", "ru": "🎁 Акции"},
     "best_sellers": {"ar": "⭐ الاكثر مبيعا", "en": "⭐ Best Sellers", "ru": "⭐ Хиты продаж"},
-    "reviews": {"ar": "المراجعات", "en": "Reviews", "ru": "Отзывы"},
-    "profile": {"ar": "الحساب", "en": "Profile", "ru": "Профиль"},
+    "reviews": {"ar": "📝 المراجعات", "en": "📝 Reviews", "ru": "📝 Отзывы"},
+    "profile": {"ar": "👤 الحساب", "en": "👤 Profile", "ru": "👤 Профиль"},
     "coupons": {"ar": "Coupons", "en": "Coupons", "ru": "Coupons"},
     "wholesale": {"ar": "Wholesale Prices", "en": "Wholesale Prices", "ru": "Wholesale Prices"},
     "topup": {"ar": "شحن الرصيد", "en": "Top Up Balance", "ru": "Пополнить баланс"},
-    "balance": {"ar": "الرصيد", "en": "Balance", "ru": "Баланс"},
-    "cart": {"ar": "السلة", "en": "Cart", "ru": "Корзина"},
+    "balance": {"ar": "💰 الرصيد", "en": "💰 Balance", "ru": "💰 Баланс"},
+    "cart": {"ar": "🛒 السلة", "en": "🛒 Cart", "ru": "🛒 Корзина"},
     "favorites": {"ar": "❤️ المفضلة", "en": "❤️ Favorites", "ru": "❤️ Избранное"},
-    "orders": {"ar": "طلباتي", "en": "My Orders", "ru": "Мои заказы"},
+    "orders": {"ar": "📦 طلباتي", "en": "📦 My Orders", "ru": "📦 Мои заказы"},
     "latest": {"ar": "آخر عمليات الشراء", "en": "Latest Purchases", "ru": "Последние покупки"},
-    "support": {"ar": "الدعم", "en": "Support", "ru": "Поддержка"},
+    "support": {"ar": "💬 الدعم", "en": "💬 Support", "ru": "💬 Поддержка"},
     "faq": {"ar": "الأسئلة الشائعة", "en": "FAQ", "ru": "FAQ"},
     "referrals": {"ar": "👥 الاحالات", "en": "👥 Referrals", "ru": "👥 Рефералы"},
     "copy_usdt": {"ar": "نسخ عنوان USDT", "en": "Copy USDT Address", "ru": "Скопировать USDT"},
-    "channel": {"ar": "القناة الرسمية", "en": "Official Channel", "ru": "Официальный канал"},
+    "channel": {"ar": "📢 القناة الرسمية", "en": "📢 Official Channel", "ru": "📢 Официальный канал"},
     "language": {"ar": "🌍 اللغة", "en": "🌍 Language", "ru": "🌍 Язык"},
     "back": {"ar": "رجوع", "en": "Back", "ru": "Назад"},
     "main": {"ar": "القائمة الرئيسية", "en": "Main Menu", "ru": "Главное меню"},
@@ -150,11 +133,7 @@ T = {
     "no_orders": {"ar": "لا توجد طلبات حالياً.", "en": "No orders yet.", "ru": "Заказов пока нет."},
     "no_latest": {"ar": "لا توجد عمليات شراء حالياً.", "en": "No purchases yet.", "ru": "Покупок пока нет."},
     "admin_only": {"ar": "هذا الأمر للأدمن فقط.", "en": "This command is for admin only.", "ru": "Эта команда только для администратора."},
-    "cancel_payment": {"ar": "إلغاء الدفع", "en": "Cancel Payment", "ru": "Отменить оплату"},
-    "payment_cancelled": {"ar": "تم إلغاء عملية الدفع.", "en": "Payment request cancelled.", "ru": "Запрос на оплату отменён."},
-    "payment_expired": {"ar": "انتهت صلاحية عملية الدفع. يرجى إنشاء عملية دفع جديدة.", "en": "This payment request has expired. Please create a new one.", "ru": "Срок оплаты истёк. Создайте новый запрос."},
 }
-
 
 def conn():
     c = sqlite3.connect(DB)
@@ -210,14 +189,6 @@ def init_db():
             status TEXT DEFAULT 'pending',
             created_at TEXT
         )""")
-        c.execute("""CREATE TABLE IF NOT EXISTS product_prices(
-            cat_key TEXT NOT NULL,
-            product_id TEXT NOT NULL,
-            label TEXT DEFAULT '',
-            price REAL,
-            updated_at TEXT,
-            PRIMARY KEY(cat_key, product_id)
-        )""")
         c.execute("""CREATE TABLE IF NOT EXISTS settings(
             key TEXT PRIMARY KEY,
             value TEXT
@@ -247,32 +218,6 @@ def init_db():
         if "created_at" not in order_cols:
             c.execute("ALTER TABLE orders ADD COLUMN created_at TEXT")
 
-        pay_cols = {row[1] for row in c.execute("PRAGMA table_info(payment_requests)").fetchall()}
-        if "expires_at" not in pay_cols:
-            c.execute("ALTER TABLE payment_requests ADD COLUMN expires_at TEXT")
-        if "wallet" not in pay_cols:
-            c.execute("ALTER TABLE payment_requests ADD COLUMN wallet TEXT DEFAULT ''")
-        if "amount" not in pay_cols:
-            c.execute("ALTER TABLE payment_requests ADD COLUMN amount REAL DEFAULT 0")
-        if "updated_at" not in pay_cols:
-            c.execute("ALTER TABLE payment_requests ADD COLUMN updated_at TEXT")
-
-        seed_product_prices(c, discount_percent=5.0)
-
-        c.execute("""CREATE TABLE IF NOT EXISTS user_min_orders(
-            user_id INTEGER PRIMARY KEY,
-            min_order REAL NOT NULL,
-            created_at TEXT
-        )""")
-        c.execute("""CREATE TABLE IF NOT EXISTS banned_users(
-            user_id INTEGER PRIMARY KEY,
-            reason TEXT DEFAULT '',
-            created_at TEXT
-        )""")
-        c.execute(
-            "INSERT OR REPLACE INTO user_min_orders(user_id, min_order, created_at) VALUES(?,?,?)",
-            (7106605623, 250.0, datetime.utcnow().isoformat())
-        )
         c.commit()
 
 def ensure(u, referrer_id: int = 0):
@@ -307,27 +252,6 @@ def txt(uid, key, **kw):
 def admin(uid):
     return uid in ADMIN_IDS
 
-
-def get_min_order(user_id):
-    with conn() as c:
-        row = c.execute("SELECT min_order FROM user_min_orders WHERE user_id=?", (user_id,)).fetchone()
-    return float(row["min_order"]) if row else MIN_ORDER
-
-def is_banned(user_id):
-    with conn() as c:
-        row = c.execute("SELECT user_id FROM banned_users WHERE user_id=?", (user_id,)).fetchone()
-    return row is not None
-
-async def block_if_banned(obj):
-    uid = obj.from_user.id
-    if is_banned(uid):
-        if isinstance(obj, Message):
-            await obj.answer("Your account has been blocked. Please contact support.")
-        else:
-            await obj.answer("Your account has been blocked.", show_alert=True)
-        return True
-    return False
-
 def set_lang(uid, l):
     with conn() as c:
         c.execute("UPDATE users SET lang=? WHERE user_id=?", (l, uid))
@@ -352,7 +276,7 @@ def remove_balance(uid, amount):
         c.execute("UPDATE users SET balance=MAX(balance-?,0) WHERE user_id=?", (amount, uid))
         c.commit()
 
-def raw_iter_items(cat_key):
+def iter_items(cat_key):
     items = PRODUCTS.get(cat_key, {}).get("items", [])
     normalized = []
     for item in items:
@@ -360,49 +284,6 @@ def raw_iter_items(cat_key):
             normalized.append({"id": str(item.get("id")), "label": str(item.get("label")), "price": item.get("price")})
         elif isinstance(item, (list, tuple)) and len(item) >= 3:
             normalized.append({"id": str(item[0]), "label": str(item[1]), "price": item[2]})
-    return normalized
-
-def seed_product_prices(c, discount_percent: float = 5.0):
-    # حفظ الأسعار داخل قاعدة البيانات حتى لا تضيع عند تعديل ملف البايثون.
-    # يتم تطبيق تخفيض 5% مرة واحدة فقط على الأسعار الأصلية عند أول تشغيل للتحديث.
-    flag = c.execute("SELECT value FROM settings WHERE key=?", ("product_prices_seeded_v2",)).fetchone()
-    if flag:
-        return
-    for cat_key in PRODUCTS.keys():
-        for item in raw_iter_items(cat_key):
-            price = item.get("price")
-            if price is None:
-                db_price = None
-            else:
-                db_price = round(float(price) * (1 - discount_percent / 100.0), 2)
-            c.execute(
-                "INSERT OR IGNORE INTO product_prices(cat_key, product_id, label, price, updated_at) VALUES(?,?,?,?,?)",
-                (cat_key, item["id"], item["label"], db_price, datetime.utcnow().isoformat())
-            )
-    c.execute("INSERT OR REPLACE INTO settings(key, value) VALUES(?,?)", ("product_prices_seeded_v2", "1"))
-
-def get_product_price(cat_key: str, product_id: str, fallback=None):
-    try:
-        with conn() as c:
-            row = c.execute("SELECT price FROM product_prices WHERE cat_key=? AND product_id=?", (cat_key, str(product_id))).fetchone()
-        if row and row["price"] is not None:
-            return float(row["price"])
-    except Exception:
-        pass
-    return fallback
-
-def set_product_price(cat_key: str, product_id: str, price: float, label: str = ""):
-    with conn() as c:
-        c.execute(
-            "INSERT OR REPLACE INTO product_prices(cat_key, product_id, label, price, updated_at) VALUES(?,?,?,?,?)",
-            (cat_key, str(product_id), label, float(price), datetime.utcnow().isoformat())
-        )
-        c.commit()
-
-def iter_items(cat_key):
-    normalized = raw_iter_items(cat_key)
-    for item in normalized:
-        item["price"] = get_product_price(cat_key, item["id"], item.get("price"))
     return normalized
 
 def get_item(cat_key, pid):
@@ -414,29 +295,6 @@ def get_item(cat_key, pid):
 def cat_name(cat_key, l):
     cat = PRODUCTS.get(cat_key, {})
     return cat.get(l, cat.get("en", cat_key))
-
-def is_hidden_category(cat_key: str, cat: Dict[str, Any]) -> bool:
-    names = " ".join(str(cat.get(k, "")) for k in ("ar", "en", "ru"))
-    haystack = f"{cat_key} {names}".lower()
-    return any(word in haystack for word in HIDDEN_PRODUCT_KEYWORDS)
-
-def category_custom_emoji_id(cat_key: str, cat: Optional[Dict[str, Any]] = None) -> Optional[str]:
-    cat = cat or PRODUCTS.get(cat_key, {})
-    names = " ".join(str(cat.get(k, "")) for k in ("ar", "en", "ru"))
-    haystack = f"{cat_key} {names}".lower()
-    if "razer" in haystack:
-        return CUSTOM_EMOJI["razer"]
-    if "pubg" in haystack or " uc" in f" {haystack}" or "uc " in haystack:
-        return CUSTOM_EMOJI["pubg_uc"]
-    if "steam" in haystack:
-        return CUSTOM_EMOJI["steam"]
-    if "playstation" in haystack or "play station" in haystack or "psn" in haystack:
-        return CUSTOM_EMOJI["playstation"]
-    if "roblox" in haystack:
-        return CUSTOM_EMOJI["roblox"]
-    if "itunes" in haystack or "apple" in haystack:
-        return CUSTOM_EMOJI["itunes"]
-    return None
 
 def product_name(cat_key, item, l):
     return f"{cat_name(cat_key, l)} {item['label']}"
@@ -517,21 +375,9 @@ def referral_stats(uid: int):
     earnings = float(u["referral_earnings"] or 0.0) if u else 0.0
     return invited, earnings
 
-def styled_button(text: str, *, style: Optional[str] = None, icon_custom_emoji_id: Optional[str] = None, **kwargs) -> InlineKeyboardButton:
-    """
-    Create Telegram inline buttons with the new Bot API color/style fields.
-    Supported styles: danger = red, success = green, primary = blue.
-    """
-    data = {"text": text, **kwargs}
-    if style:
-        data["style"] = style
-    if icon_custom_emoji_id:
-        data["icon_custom_emoji_id"] = icon_custom_emoji_id
-    return InlineKeyboardButton(**data)
-
 def kb_lang():
     return InlineKeyboardMarkup(inline_keyboard=[
-        [styled_button(text=v, callback_data=f"lang:{k}", style="primary")]
+        [InlineKeyboardButton(text=v, callback_data=f"lang:{k}")]
         for k, v in LANGS.items()
     ])
 
@@ -542,19 +388,14 @@ def web_reviews_url():
 def kb_main(uid):
     l = lang(uid)
     rows = [
-        [styled_button(text=T["products"][l], callback_data="shop", style="primary", icon_custom_emoji_id=CUSTOM_EMOJI["shop"])],
-        [styled_button(text=T["topup"][l], callback_data="topup", style="primary", icon_custom_emoji_id=CUSTOM_EMOJI["topup"]),
-         styled_button(text=T["balance"][l], callback_data="balance", style="primary", icon_custom_emoji_id=CUSTOM_EMOJI["balance"])],
-        [styled_button(text=T["orders"][l], callback_data="orders", style="primary", icon_custom_emoji_id=CUSTOM_EMOJI["cart_orders"]),
-         styled_button(text=T["cart"][l], callback_data="cart", style="primary", icon_custom_emoji_id=CUSTOM_EMOJI["cart_orders"])],
-        [styled_button(text=T["special_offers"][l], callback_data="special_offers", style="danger"),
-         styled_button(text=T["best_sellers"][l], callback_data="best_sellers", style="danger")],
-        [styled_button(text=T["favorites"][l], callback_data="favorites", style="primary"),
-         styled_button(text=T["profile"][l], callback_data="profile", style="primary", icon_custom_emoji_id=CUSTOM_EMOJI["profile"])],
-        [styled_button(text=T["referrals"][l], callback_data="referrals", style="danger"),
-         styled_button(text=T["language"][l], callback_data="choose_lang", style="primary")],
-        [styled_button(text=T["support"][l], callback_data="support", style="success", icon_custom_emoji_id=CUSTOM_EMOJI["support"]),
-         styled_button(text=T["channel"][l], url=CHANNEL_URL, style="primary", icon_custom_emoji_id=CUSTOM_EMOJI["channel"])],
+        [InlineKeyboardButton(text=T["shop"][l], web_app=WebAppInfo(url=WEB_APP_URL))],
+        [InlineKeyboardButton(text=T["products"][l], callback_data="shop")],
+        [InlineKeyboardButton(text=T["special_offers"][l], callback_data="special_offers"), InlineKeyboardButton(text=T["best_sellers"][l], callback_data="best_sellers")],
+        [InlineKeyboardButton(text=T["orders"][l], callback_data="orders"), InlineKeyboardButton(text=T["balance"][l], callback_data="balance")],
+        [InlineKeyboardButton(text=T["cart"][l], callback_data="cart"), InlineKeyboardButton(text=T["favorites"][l], callback_data="favorites")],
+        [InlineKeyboardButton(text=T["profile"][l], callback_data="profile"), InlineKeyboardButton(text=T["language"][l], callback_data="choose_lang")],
+        [InlineKeyboardButton(text=T["referrals"][l], callback_data="referrals"), InlineKeyboardButton(text=T["reviews"][l], web_app=WebAppInfo(url=web_reviews_url()))],
+        [InlineKeyboardButton(text=T["support"][l], callback_data="support"), InlineKeyboardButton(text=T["channel"][l], url=CHANNEL_URL)],
     ]
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
@@ -562,103 +403,40 @@ def kb_cats(uid):
     l = lang(uid)
     rows = []
     for k, v in PRODUCTS.items():
-        if is_hidden_category(k, v):
-            continue
-        rows.append([styled_button(
-            text=v.get(l, v.get("en", k)),
-            callback_data=f"cat:{k}",
-            style="primary",
-            icon_custom_emoji_id=category_custom_emoji_id(k, v),
-        )])
-    rows.append([styled_button(text=T["back"][l], callback_data="main", style="danger")])
+        rows.append([InlineKeyboardButton(text=v.get(l, v.get("en", k)), callback_data=f"cat:{k}")])
+    rows.append([InlineKeyboardButton(text=T["back"][l], callback_data="main")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 def kb_items(uid, cat_key):
     l = lang(uid)
     rows = []
     for item in iter_items(cat_key):
-        rows.append([styled_button(text=f"{item['label']} - {price_text(item['price'])}", callback_data=f"view:{cat_key}:{item['id']}", style="primary")])
-    rows.append([styled_button(text=T["back"][l], callback_data="shop", style="danger")])
+        rows.append([InlineKeyboardButton(text=f"{item['label']} - {price_text(item['price'])}", callback_data=f"view:{cat_key}:{item['id']}")])
+    rows.append([InlineKeyboardButton(text=T["back"][l], callback_data="shop")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 def kb_product_actions(uid, cat_key, pid):
     l = lang(uid)
     return InlineKeyboardMarkup(inline_keyboard=[
-        [styled_button(text=T["buy_now"][l], callback_data=f"buy:{cat_key}:{pid}", style="success")],
-        [styled_button(text=T["add_cart"][l], callback_data=f"addcart:{cat_key}:{pid}", style="primary")],
-        [styled_button(text=T["add_fav"][l], callback_data=f"addfav:{cat_key}:{pid}", style="danger")],
-        [styled_button(text=T["gift"][l], callback_data=f"gift:{cat_key}:{pid}", style="primary")],
-        [styled_button(text=T["back"][l], callback_data=f"cat:{cat_key}", style="danger")],
+        [InlineKeyboardButton(text=T["buy_now"][l], callback_data=f"buy:{cat_key}:{pid}")],
+        [InlineKeyboardButton(text=T["add_cart"][l], callback_data=f"addcart:{cat_key}:{pid}")],
+        [InlineKeyboardButton(text=T["add_fav"][l], callback_data=f"addfav:{cat_key}:{pid}")],
+        [InlineKeyboardButton(text=T["gift"][l], callback_data=f"gift:{cat_key}:{pid}")],
+        [InlineKeyboardButton(text=T["back"][l], callback_data=f"cat:{cat_key}")],
     ])
 
-def payment_keyboard(uid, payment_id: Optional[int] = None):
+def payment_keyboard(uid):
     l = lang(uid)
-    paid_cb = f"paid:{payment_id}" if payment_id else "paid"
-    cancel_cb = f"cancel_payment:{payment_id}" if payment_id else "main"
     return InlineKeyboardMarkup(inline_keyboard=[
-        [styled_button(text=T["copy_usdt"][l], callback_data="copy_usdt", style="primary", icon_custom_emoji_id=CUSTOM_EMOJI["topup"])],
-        [styled_button(text=T["i_paid"][l], callback_data=paid_cb, style="success", icon_custom_emoji_id=CUSTOM_EMOJI["topup"])],
-        [styled_button(text=T["cancel_payment"][l], callback_data=cancel_cb, style="danger")],
-        [styled_button(text=SUPPORT_USERNAME, url=f"https://t.me/{SUPPORT_USERNAME.replace('@','')}", style="success", icon_custom_emoji_id=CUSTOM_EMOJI["support"])],
-        [styled_button(text=T["back"][l], callback_data="main", style="danger")],
+        [InlineKeyboardButton(text=T["copy_usdt"][l], callback_data="copy_usdt")],
+        [InlineKeyboardButton(text=T["i_paid"][l], callback_data="paid")],
+        [InlineKeyboardButton(text=SUPPORT_USERNAME, url=f"https://t.me/{SUPPORT_USERNAME.replace('@','')}")],
+        [InlineKeyboardButton(text=T["back"][l], callback_data="main")],
     ])
 
 def main_back_keyboard(uid):
     l = lang(uid)
-    return InlineKeyboardMarkup(inline_keyboard=[[styled_button(text=T["main"][l], callback_data="main", style="primary")]])
-
-def create_payment_request(uid: int, username: str = ""):
-    now = datetime.utcnow()
-    expires = now + timedelta(minutes=20)
-    with conn() as c:
-        # أي عملية قديمة قيد الانتظار لنفس المستخدم تصبح منتهية عند إنشاء عملية جديدة.
-        c.execute("UPDATE payment_requests SET status='expired', updated_at=? WHERE user_id=? AND status='pending'", (now.isoformat(), uid))
-        cur = c.execute(
-            "INSERT INTO payment_requests(user_id, username, status, wallet, created_at, expires_at, updated_at) VALUES(?,?,?,?,?,?,?)",
-            (uid, username or "", "pending", USDT_BEP20_ADDRESS, now.isoformat(), expires.isoformat(), now.isoformat())
-        )
-        pid = cur.lastrowid
-        c.commit()
-    return pid, expires
-
-def get_payment_request(payment_id: int):
-    with conn() as c:
-        return c.execute("SELECT * FROM payment_requests WHERE id=?", (payment_id,)).fetchone()
-
-def expire_old_payment_requests():
-    now = datetime.utcnow().isoformat()
-    with conn() as c:
-        c.execute("UPDATE payment_requests SET status='expired', updated_at=? WHERE status='pending' AND expires_at IS NOT NULL AND expires_at < ?", (now, now))
-        c.commit()
-
-def payment_is_expired(row) -> bool:
-    try:
-        return bool(row and row["expires_at"] and datetime.utcnow() >= datetime.fromisoformat(row["expires_at"]))
-    except Exception:
-        return False
-
-def payment_message(uid: int, payment_id: int, expires_at: datetime) -> str:
-    l = lang(uid)
-    if l == "ar":
-        return (
-            f"طلب شحن الرصيد #{payment_id}\n\n"
-            f"USDT BEP20 Address:\n{USDT_BEP20_ADDRESS}\n\n"
-            "لديك 20 دقيقة لإتمام الدفع على هذا العنوان. بعد انتهاء الوقت سيتم إلغاء عملية الدفع تلقائيا.\n\n"
-            "بعد الدفع اضغط زر I Have Paid ثم أرسل لقطة شاشة أو رابط/هاش المعاملة للدعم."
-        )
-    if l == "ru":
-        return (
-            f"Запрос на пополнение #{payment_id}\n\n"
-            f"USDT BEP20 Address:\n{USDT_BEP20_ADDRESS}\n\n"
-            "У вас есть 20 минут для оплаты на этот адрес. После окончания времени запрос будет отменён автоматически.\n\n"
-            "После оплаты нажмите I Have Paid и отправьте скриншот или hash/link в поддержку."
-        )
-    return (
-        f"Top Up Request #{payment_id}\n\n"
-        f"USDT BEP20 Address:\n{USDT_BEP20_ADDRESS}\n\n"
-        "You have 20 minutes to complete the payment to this address. After the time ends, this payment request will be cancelled automatically.\n\n"
-        "After payment, press I Have Paid and send the screenshot or transaction hash/link to support."
-    )
+    return InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text=T["main"][l], callback_data="main")]])
 
 async def safe_edit(cq: CallbackQuery, text: str, reply_markup=None, **kwargs):
     """Edit the current bot message without deleting it, so buttons feel fast and smooth."""
@@ -701,6 +479,38 @@ async def send_welcome_message(m: Message):
             except Exception:
                 continue
     await m.answer(txt(m.from_user.id, "welcome"), reply_markup=kb_main(m.from_user.id))
+
+
+# === OLD BOT CLOSED REDIRECT MODE ===
+# The original bot code, buttons and menus are kept.
+# This small block is registered before the old handlers, so any /start, text,
+# photo, or button press only shows the relocation message.
+CLOSED_REDIRECT_TEXT = (
+    "تم قفل هذا البوت ونقل البوت إلى بوت جديد. البوت الجديد هنا: @TopupPrimeBot\n\n"
+    "This bot has been closed and moved to a new bot. The new bot is here: @TopupPrimeBot"
+)
+
+@dp.message()
+async def old_bot_closed_all_messages(m: Message):
+    try:
+        ensure(m.from_user)
+    except Exception:
+        pass
+    await m.answer(CLOSED_REDIRECT_TEXT, reply_markup=kb_main(m.from_user.id))
+
+@dp.callback_query()
+async def old_bot_closed_all_buttons(cq: CallbackQuery):
+    try:
+        ensure(cq.from_user)
+    except Exception:
+        pass
+    try:
+        await cq.answer()
+    except Exception:
+        pass
+    if cq.message:
+        await cq.message.answer(CLOSED_REDIRECT_TEXT, reply_markup=kb_main(cq.from_user.id))
+# === END OLD BOT CLOSED REDIRECT MODE ===
 
 @dp.message(CommandStart())
 async def start(m: Message):
@@ -748,15 +558,7 @@ async def admin_panel(m: Message):
         "/addcoupon CODE PERCENT\n"
         "/delcoupon CODE\n"
         "/coupons\n"
-        "/ban USER_ID\n"
-        "/unban USER_ID\n"
-        "/setmin USER_ID AMOUNT\n"
-        "/resetmin USER_ID\n"
-        "/discount24\n"
-        "/prices\n"
-        "/setprice CAT_KEY PRODUCT_ID PRICE\n"
-        "/discountall PERCENT\n"
-        "/payments"
+        "/discount24"
     )
 
 @dp.message(Command("addbalance"))
@@ -901,79 +703,6 @@ async def cmd_discount24(m: Message):
     until = start_flash_discount(2.0, 24)
     await m.answer(f"2% discount activated for 24 hours. Ends UTC: {until}")
 
-@dp.message(Command("prices"))
-async def cmd_prices(m: Message):
-    if not admin(m.from_user.id):
-        return await m.answer(T["admin_only"]["en"])
-    lines = ["Product Prices", "Use: /setprice CAT_KEY PRODUCT_ID PRICE", ""]
-    for cat_key, cat in PRODUCTS.items():
-        if is_hidden_category(cat_key, cat):
-            continue
-        lines.append(f"[{cat_key}] {cat.get('en', cat_key)}")
-        for item in iter_items(cat_key):
-            lines.append(f"  {item['id']} | {item['label']} | {price_text(item['price'])}")
-        lines.append("")
-    text = "\n".join(lines)
-    for i in range(0, len(text), 3900):
-        await m.answer(text[i:i+3900])
-
-@dp.message(Command("setprice"))
-async def cmd_setprice(m: Message):
-    if not admin(m.from_user.id):
-        return await m.answer(T["admin_only"]["en"])
-    p = m.text.split()
-    if len(p) != 4:
-        return await m.answer("Usage: /setprice CAT_KEY PRODUCT_ID PRICE")
-    cat_key, pid = p[1], p[2]
-    item = get_item(cat_key, pid)
-    if not item:
-        return await m.answer("Product not found. Use /prices to see CAT_KEY and PRODUCT_ID.")
-    try:
-        price = float(p[3])
-        set_product_price(cat_key, pid, price, item.get("label", ""))
-        await m.answer(f"Price updated.\nCategory: {cat_key}\nProduct: {item['label']}\nNew price: {price:.2f} USDT")
-    except Exception:
-        await m.answer("Invalid price.")
-
-@dp.message(Command("discountall"))
-async def cmd_discountall(m: Message):
-    if not admin(m.from_user.id):
-        return await m.answer(T["admin_only"]["en"])
-    p = m.text.split()
-    if len(p) != 2:
-        return await m.answer("Usage: /discountall PERCENT")
-    try:
-        percent = float(p[1])
-        if percent < 0 or percent > 90:
-            return await m.answer("Percent must be between 0 and 90.")
-        count = 0
-        for cat_key, cat in PRODUCTS.items():
-            if is_hidden_category(cat_key, cat):
-                continue
-            for item in iter_items(cat_key):
-                if item.get("price") is None:
-                    continue
-                new_price = round(float(item["price"]) * (1 - percent / 100.0), 2)
-                set_product_price(cat_key, item["id"], new_price, item.get("label", ""))
-                count += 1
-        await m.answer(f"Discount applied to all current product prices.\nPercent: {percent}%\nUpdated products: {count}")
-    except Exception:
-        await m.answer("Invalid percent.")
-
-@dp.message(Command("payments"))
-async def cmd_payments(m: Message):
-    if not admin(m.from_user.id):
-        return await m.answer(T["admin_only"]["en"])
-    expire_old_payment_requests()
-    with conn() as c:
-        rows = c.execute("SELECT * FROM payment_requests ORDER BY id DESC LIMIT 30").fetchall()
-    if not rows:
-        return await m.answer("No payment requests.")
-    text = "Payment Requests\n\n"
-    for r in rows:
-        text += f"#{r['id']} | User: {r['user_id']} | @{r['username']} | {r['status']} | Created: {r['created_at']} | Expires: {r['expires_at'] or '-'}\n"
-    await m.answer(text[:4000])
-
 @dp.message(Command("coupon"))
 async def cmd_coupon(m: Message):
     ensure(m.from_user)
@@ -989,68 +718,8 @@ async def cmd_coupon(m: Message):
         c.commit()
     await m.answer(txt(m.from_user.id, "coupon_ok"))
 
-
-@dp.message(Command("ban"))
-async def cmd_ban(m: Message):
-    if not admin(m.from_user.id):
-        return await m.answer(T["admin_only"]["en"])
-    p = m.text.split(maxsplit=2)
-    if len(p) < 2 or not p[1].isdigit():
-        return await m.answer("Usage: /ban USER_ID")
-    uid = int(p[1])
-    reason = p[2] if len(p) > 2 else ""
-    with conn() as c:
-        c.execute("INSERT OR REPLACE INTO banned_users(user_id, reason, created_at) VALUES(?,?,?)", (uid, reason, datetime.utcnow().isoformat()))
-        c.commit()
-    await m.answer(f"User banned.\nUser ID: {uid}")
-
-@dp.message(Command("unban"))
-async def cmd_unban(m: Message):
-    if not admin(m.from_user.id):
-        return await m.answer(T["admin_only"]["en"])
-    p = m.text.split()
-    if len(p) != 2 or not p[1].isdigit():
-        return await m.answer("Usage: /unban USER_ID")
-    uid = int(p[1])
-    with conn() as c:
-        c.execute("DELETE FROM banned_users WHERE user_id=?", (uid,))
-        c.commit()
-    await m.answer(f"User unbanned.\nUser ID: {uid}")
-
-@dp.message(Command("setmin"))
-async def cmd_setmin(m: Message):
-    if not admin(m.from_user.id):
-        return await m.answer(T["admin_only"]["en"])
-    p = m.text.split()
-    if len(p) != 3 or not p[1].isdigit():
-        return await m.answer("Usage: /setmin USER_ID AMOUNT")
-    try:
-        uid = int(p[1])
-        amount = float(p[2])
-        with conn() as c:
-            c.execute("INSERT OR REPLACE INTO user_min_orders(user_id, min_order, created_at) VALUES(?,?,?)", (uid, amount, datetime.utcnow().isoformat()))
-            c.commit()
-        await m.answer(f"Custom minimum order saved.\nUser ID: {uid}\nMinimum: {amount:.2f} USDT")
-    except Exception:
-        await m.answer("Invalid input")
-
-@dp.message(Command("resetmin"))
-async def cmd_resetmin(m: Message):
-    if not admin(m.from_user.id):
-        return await m.answer(T["admin_only"]["en"])
-    p = m.text.split()
-    if len(p) != 2 or not p[1].isdigit():
-        return await m.answer("Usage: /resetmin USER_ID")
-    uid = int(p[1])
-    with conn() as c:
-        c.execute("DELETE FROM user_min_orders WHERE user_id=?", (uid,))
-        c.commit()
-    await m.answer(f"Custom minimum removed.\nUser ID: {uid}\nDefault minimum: {MIN_ORDER:.2f} USDT")
-
 @dp.callback_query(F.data.startswith("lang:"))
 async def cb_lang(cq: CallbackQuery):
-    if await block_if_banned(cq):
-        return
     ensure(cq.from_user)
     set_lang(cq.from_user.id, cq.data.split(":")[1])
     await safe_edit(cq, txt(cq.from_user.id, "welcome"), reply_markup=kb_main(cq.from_user.id))
@@ -1058,103 +727,54 @@ async def cb_lang(cq: CallbackQuery):
 
 @dp.callback_query(F.data == "choose_lang")
 async def cb_choose_lang(cq: CallbackQuery):
-    if await block_if_banned(cq):
-        return
     await safe_edit(cq, T["choose_lang"][lang(cq.from_user.id)], reply_markup=kb_lang())
     await cq.answer()
 
 @dp.callback_query(F.data == "main")
 async def cb_main(cq: CallbackQuery):
-    if await block_if_banned(cq):
-        return
     await safe_edit(cq, txt(cq.from_user.id, "welcome"), reply_markup=kb_main(cq.from_user.id))
     await cq.answer()
 
 @dp.callback_query(F.data == "shop")
 async def cb_shop(cq: CallbackQuery):
-    if await block_if_banned(cq):
-        return
     await safe_edit(cq, txt(cq.from_user.id, "category_text"), reply_markup=kb_cats(cq.from_user.id))
     await cq.answer()
 
 @dp.callback_query(F.data == "topup")
 async def cb_topup(cq: CallbackQuery):
-    if await block_if_banned(cq):
-        return
-    ensure(cq.from_user)
-    expire_old_payment_requests()
-    pid, expires = create_payment_request(cq.from_user.id, cq.from_user.username or "")
-    await safe_edit(cq, payment_message(cq.from_user.id, pid, expires), reply_markup=payment_keyboard(cq.from_user.id, pid))
-    await cq.answer("Payment request created")
+    text = txt(cq.from_user.id, "pay", wallet=USDT_BEP20_ADDRESS, bybit=BYBIT_ID, support=SUPPORT_USERNAME)
+    await safe_edit(cq, text, reply_markup=payment_keyboard(cq.from_user.id))
+    await cq.answer()
 
-@dp.callback_query(F.data.startswith("paid"))
+@dp.callback_query(F.data == "paid")
 async def cb_paid(cq: CallbackQuery):
-    if await block_if_banned(cq):
-        return
     ensure(cq.from_user)
-    expire_old_payment_requests()
-    parts = cq.data.split(":")
-    pid = int(parts[1]) if len(parts) == 2 and parts[1].isdigit() else 0
-    if not pid:
-        with conn() as c:
-            row = c.execute("SELECT * FROM payment_requests WHERE user_id=? AND status='pending' ORDER BY id DESC LIMIT 1", (cq.from_user.id,)).fetchone()
-        if not row:
-            pid, _ = create_payment_request(cq.from_user.id, cq.from_user.username or "")
-        else:
-            pid = int(row["id"])
-    row = get_payment_request(pid)
-    if not row or int(row["user_id"]) != int(cq.from_user.id):
-        return await cq.answer("Payment request not found", show_alert=True)
-    if row["status"] != "pending" or payment_is_expired(row):
-        with conn() as c:
-            c.execute("UPDATE payment_requests SET status='expired', updated_at=? WHERE id=? AND status='pending'", (datetime.utcnow().isoformat(), pid))
-            c.commit()
-        await safe_edit(cq, txt(cq.from_user.id, "payment_expired"), reply_markup=main_back_keyboard(cq.from_user.id))
-        return await cq.answer()
     with conn() as c:
-        c.execute("UPDATE payment_requests SET status='paid', updated_at=? WHERE id=?", (datetime.utcnow().isoformat(), pid))
+        cur = c.execute(
+            "INSERT INTO payment_requests(user_id, username, status, created_at) VALUES(?,?,?,?)",
+            (cq.from_user.id, cq.from_user.username or "", "pending", datetime.utcnow().isoformat())
+        )
+        pid = cur.lastrowid
         c.commit()
     await notify_admins(
-        f"Payment Notice #{pid}\n\nUser ID: {cq.from_user.id}\nUsername: @{cq.from_user.username}\nStatus: Paid / Waiting Review\nWallet: {USDT_BEP20_ADDRESS}\n\nAsk the user for screenshot/hash if needed, then add balance manually after verification."
+        f"Payment Notice #{pid}\n\nUser ID: {cq.from_user.id}\nUsername: @{cq.from_user.username}\nStatus: Pending\n\nAsk the user for screenshot/hash if needed."
     )
     await safe_edit(cq, txt(cq.from_user.id, "paid_sent"), reply_markup=main_back_keyboard(cq.from_user.id))
     await cq.answer()
 
-@dp.callback_query(F.data.startswith("cancel_payment:"))
-async def cb_cancel_payment(cq: CallbackQuery):
-    if await block_if_banned(cq):
-        return
-    pid = int(cq.data.split(":", 1)[1])
-    row = get_payment_request(pid)
-    if row and int(row["user_id"]) == int(cq.from_user.id) and row["status"] == "pending":
-        with conn() as c:
-            c.execute("UPDATE payment_requests SET status='cancelled', updated_at=? WHERE id=?", (datetime.utcnow().isoformat(), pid))
-            c.commit()
-    await safe_edit(cq, txt(cq.from_user.id, "payment_cancelled"), reply_markup=main_back_keyboard(cq.from_user.id))
-    await cq.answer()
 
 @dp.callback_query(F.data == "copy_usdt")
 async def cb_copy_usdt(cq: CallbackQuery):
-    if await block_if_banned(cq):
-        return
-    expire_old_payment_requests()
-    with conn() as c:
-        row = c.execute("SELECT * FROM payment_requests WHERE user_id=? AND status='pending' ORDER BY id DESC LIMIT 1", (cq.from_user.id,)).fetchone()
-    if not row:
-        pid, expires = create_payment_request(cq.from_user.id, cq.from_user.username or "")
-    else:
-        pid, expires = int(row["id"]), datetime.fromisoformat(row["expires_at"])
+    # Telegram bots cannot copy text directly to the user's clipboard.
+    # This sends the wallet address alone in a separate message so the user can copy it easily.
     await cq.answer("USDT address sent below")
     await cq.message.answer(
-        f"Top Up Request #{pid}\n\nUSDT BEP20 Address:\n\n`{USDT_BEP20_ADDRESS}`\n\nYou have 20 minutes to pay. Tap and hold the address to copy it.",
-        parse_mode="Markdown",
-        reply_markup=payment_keyboard(cq.from_user.id, pid)
+        f"USDT BEP20 Address:\n\n`{USDT_BEP20_ADDRESS}`\n\nTap and hold the address to copy it.",
+        parse_mode="Markdown"
     )
 
 @dp.callback_query(F.data == "faq")
 async def cb_faq(cq: CallbackQuery):
-    if await block_if_banned(cq):
-        return
     l = lang(cq.from_user.id)
     if l == "ar":
         text = (
@@ -1197,8 +817,6 @@ async def cb_faq(cq: CallbackQuery):
 
 @dp.callback_query(F.data == "referrals")
 async def cb_referrals(cq: CallbackQuery):
-    if await block_if_banned(cq):
-        return
     ensure(cq.from_user)
     invited, earnings = referral_stats(cq.from_user.id)
     bot_username = (await bot.get_me()).username
@@ -1215,8 +833,6 @@ async def cb_referrals(cq: CallbackQuery):
 
 @dp.callback_query(F.data == "balance")
 async def cb_balance(cq: CallbackQuery):
-    if await block_if_banned(cq):
-        return
     u = user(cq.from_user.id)
     b = float(u["balance"]) if u else 0.0
     code, discount = get_discount(cq.from_user.id)
@@ -1225,27 +841,23 @@ async def cb_balance(cq: CallbackQuery):
         text += f"\nCoupon: {code} ({discount:.0f}%)"
     text += "\n\n" + txt(cq.from_user.id, "coupon_help")
     await safe_edit(cq, text, reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-        [styled_button(text=T["topup"][lang(cq.from_user.id)], callback_data="topup", style="primary", icon_custom_emoji_id=CUSTOM_EMOJI["topup"])],
-        [styled_button(text=T["back"][lang(cq.from_user.id)], callback_data="main", style="danger")]
+        [InlineKeyboardButton(text=T["topup"][lang(cq.from_user.id)], callback_data="topup")],
+        [InlineKeyboardButton(text=T["back"][lang(cq.from_user.id)], callback_data="main")]
     ]))
     await cq.answer()
 
 @dp.callback_query(F.data == "support")
 async def cb_support(cq: CallbackQuery):
-    if await block_if_banned(cq):
-        return
     text = txt(cq.from_user.id, "pay", wallet=USDT_BEP20_ADDRESS, bybit=BYBIT_ID, support=SUPPORT_USERNAME)
     await safe_edit(cq, text, reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-        [styled_button(text=SUPPORT_USERNAME, url=f"https://t.me/{SUPPORT_USERNAME.replace('@','')}", style="success", icon_custom_emoji_id=CUSTOM_EMOJI["support"])],
-        [styled_button(text=T["channel"][lang(cq.from_user.id)], url=CHANNEL_URL, style="primary", icon_custom_emoji_id=CUSTOM_EMOJI["channel"])],
-        [styled_button(text=T["back"][lang(cq.from_user.id)], callback_data="main", style="danger")]
+        [InlineKeyboardButton(text=SUPPORT_USERNAME, url=f"https://t.me/{SUPPORT_USERNAME.replace('@','')}")],
+        [InlineKeyboardButton(text=T["channel"][lang(cq.from_user.id)], url=CHANNEL_URL)],
+        [InlineKeyboardButton(text=T["back"][lang(cq.from_user.id)], callback_data="main")]
     ]))
     await cq.answer()
 
 @dp.callback_query(F.data == "orders")
 async def cb_orders(cq: CallbackQuery):
-    if await block_if_banned(cq):
-        return
     with conn() as c:
         rows = c.execute("SELECT * FROM orders WHERE user_id=? ORDER BY id DESC LIMIT 10", (cq.from_user.id,)).fetchall()
     if not rows:
@@ -1259,8 +871,6 @@ async def cb_orders(cq: CallbackQuery):
 
 @dp.callback_query(F.data == "latest")
 async def cb_latest(cq: CallbackQuery):
-    if await block_if_banned(cq):
-        return
     with conn() as c:
         rows = c.execute("SELECT * FROM orders ORDER BY id DESC LIMIT 10").fetchall()
     if not rows:
@@ -1274,8 +884,6 @@ async def cb_latest(cq: CallbackQuery):
 
 @dp.callback_query(F.data == "profile")
 async def cb_profile(cq: CallbackQuery):
-    if await block_if_banned(cq):
-        return
     u = user(cq.from_user.id)
     invited, earnings = referral_stats(cq.from_user.id)
     b = float(u["balance"]) if u else 0.0
@@ -1292,8 +900,6 @@ async def cb_profile(cq: CallbackQuery):
 
 @dp.callback_query(F.data == "special_offers")
 async def cb_special_offers(cq: CallbackQuery):
-    if await block_if_banned(cq):
-        return
     text = (
         "Special Offers\n\n"
         "HOT DEAL: Razer Gold and PUBG UC are available with trader prices.\n"
@@ -1305,8 +911,6 @@ async def cb_special_offers(cq: CallbackQuery):
 
 @dp.callback_query(F.data == "best_sellers")
 async def cb_best_sellers(cq: CallbackQuery):
-    if await block_if_banned(cq):
-        return
     text = (
         "Best Sellers\n\n"
         "Razer Gold\n"
@@ -1321,22 +925,18 @@ async def cb_best_sellers(cq: CallbackQuery):
 
 @dp.callback_query(F.data == "reviews")
 async def cb_reviews(cq: CallbackQuery):
-    if await block_if_banned(cq):
-        return
     text = (
         "Customer Reviews\n\n"
         "Open the MD STORE Web App to view customer reviews, ratings, and proof of recent deals."
     )
     await safe_edit(cq, text, reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-        [styled_button(text="Open Reviews", web_app=WebAppInfo(url=web_reviews_url()), style="success")],
-        [styled_button(text=T["back"][lang(cq.from_user.id)], callback_data="main", style="danger")]
+        [InlineKeyboardButton(text="Open Reviews", web_app=WebAppInfo(url=web_reviews_url()))],
+        [InlineKeyboardButton(text=T["back"][lang(cq.from_user.id)], callback_data="main")]
     ]))
     await cq.answer()
 
 @dp.callback_query(F.data == "coupons")
 async def cb_coupons(cq: CallbackQuery):
-    if await block_if_banned(cq):
-        return
     text = (
         "Coupons\n\n"
         "WELCOME5\n"
@@ -1348,8 +948,6 @@ async def cb_coupons(cq: CallbackQuery):
 
 @dp.callback_query(F.data == "wholesale")
 async def cb_wholesale(cq: CallbackQuery):
-    if await block_if_banned(cq):
-        return
     text = (
         "Wholesale Prices\n\n"
         "MD STORE supplies digital cards and game top-ups for traders and resellers.\n"
@@ -1357,27 +955,19 @@ async def cb_wholesale(cq: CallbackQuery):
         f"Minimum order: {get_min_order(cq.from_user.id):.0f} USDT"
     )
     await safe_edit(cq, text, reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-        [styled_button(text=SUPPORT_USERNAME, url=f"https://t.me/{SUPPORT_USERNAME.replace('@','')}", style="success", icon_custom_emoji_id=CUSTOM_EMOJI["support"])],
-        [styled_button(text=T["back"][lang(cq.from_user.id)], callback_data="main", style="danger")]
+        [InlineKeyboardButton(text=SUPPORT_USERNAME, url=f"https://t.me/{SUPPORT_USERNAME.replace('@','')}")],
+        [InlineKeyboardButton(text=T["back"][lang(cq.from_user.id)], callback_data="main")]
     ]))
     await cq.answer()
 
 @dp.callback_query(F.data.startswith("cat:"))
 async def cb_cat(cq: CallbackQuery):
-    if await block_if_banned(cq):
-        return
     cat_key = cq.data.split(":")[1]
-    cat = PRODUCTS.get(cat_key, {})
-    if is_hidden_category(cat_key, cat):
-        await cq.answer("Product is unavailable", show_alert=True)
-        return
     await safe_edit(cq, cat_name(cat_key, lang(cq.from_user.id)), reply_markup=kb_items(cq.from_user.id, cat_key))
     await cq.answer()
 
 @dp.callback_query(F.data.startswith("view:"))
 async def cb_view(cq: CallbackQuery):
-    if await block_if_banned(cq):
-        return
     _, cat_key, pid = cq.data.split(":")
     item = get_item(cat_key, pid)
     if not item:
@@ -1389,8 +979,6 @@ async def cb_view(cq: CallbackQuery):
 
 @dp.callback_query(F.data.startswith("addcart:"))
 async def cb_addcart(cq: CallbackQuery):
-    if await block_if_banned(cq):
-        return
     _, cat_key, pid = cq.data.split(":")
     item = get_item(cat_key, pid)
     if not item:
@@ -1405,8 +993,6 @@ async def cb_addcart(cq: CallbackQuery):
 
 @dp.callback_query(F.data.startswith("addfav:"))
 async def cb_addfav(cq: CallbackQuery):
-    if await block_if_banned(cq):
-        return
     _, cat_key, pid = cq.data.split(":")
     item = get_item(cat_key, pid)
     if not item:
@@ -1421,8 +1007,6 @@ async def cb_addfav(cq: CallbackQuery):
 
 @dp.callback_query(F.data == "favorites")
 async def cb_favorites(cq: CallbackQuery):
-    if await block_if_banned(cq):
-        return
     l = lang(cq.from_user.id)
     with conn() as c:
         rows = c.execute("SELECT * FROM favorites WHERE user_id=? ORDER BY created_at DESC", (cq.from_user.id,)).fetchall()
@@ -1432,15 +1016,13 @@ async def cb_favorites(cq: CallbackQuery):
     for r in rows:
         item = get_item(r["cat_key"], r["product_id"])
         if item:
-            buttons.append([styled_button(text=product_name(r["cat_key"], item, l), callback_data=f"view:{r['cat_key']}:{r['product_id']}", style="primary")])
-    buttons.append([styled_button(text=T["back"][l], callback_data="main", style="danger")])
+            buttons.append([InlineKeyboardButton(text=product_name(r["cat_key"], item, l), callback_data=f"view:{r['cat_key']}:{r['product_id']}")])
+    buttons.append([InlineKeyboardButton(text=T["back"][l], callback_data="main")])
     await safe_edit(cq, T["favorites"][l], reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons))
     await cq.answer()
 
 @dp.callback_query(F.data == "cart")
 async def cb_cart(cq: CallbackQuery):
-    if await block_if_banned(cq):
-        return
     l = lang(cq.from_user.id)
     with conn() as c:
         rows = c.execute("SELECT * FROM cart WHERE user_id=? ORDER BY id DESC", (cq.from_user.id,)).fetchall()
@@ -1461,16 +1043,14 @@ async def cb_cart(cq: CallbackQuery):
         text += f"\nCoupon: {code} - {percent:.0f}%\nTotal: {final:.2f} USDT"
     text += "\n\n" + txt(cq.from_user.id, "coupon_help")
     await safe_edit(cq, text, reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-        [styled_button(text=T["checkout"][l], callback_data="checkout", style="success")],
-        [styled_button(text=T["clear_cart"][l], callback_data="clearcart", style="danger")],
-        [styled_button(text=T["back"][l], callback_data="main", style="danger")]
+        [InlineKeyboardButton(text=T["checkout"][l], callback_data="checkout")],
+        [InlineKeyboardButton(text=T["clear_cart"][l], callback_data="clearcart")],
+        [InlineKeyboardButton(text=T["back"][l], callback_data="main")]
     ]))
     await cq.answer()
 
 @dp.callback_query(F.data == "clearcart")
 async def cb_clearcart(cq: CallbackQuery):
-    if await block_if_banned(cq):
-        return
     with conn() as c:
         c.execute("DELETE FROM cart WHERE user_id=?", (cq.from_user.id,))
         c.commit()
@@ -1496,8 +1076,6 @@ async def create_order(cq: CallbackQuery, product: str, price: float, gift_to: s
 
 @dp.callback_query(F.data == "checkout")
 async def cb_checkout(cq: CallbackQuery):
-    if await block_if_banned(cq):
-        return
     u = user(cq.from_user.id)
     balance = float(u["balance"]) if u else 0.0
     l = lang(cq.from_user.id)
@@ -1535,8 +1113,6 @@ async def cb_checkout(cq: CallbackQuery):
 
 @dp.callback_query(F.data.startswith("buy:"))
 async def cb_buy(cq: CallbackQuery):
-    if await block_if_banned(cq):
-        return
     _, cat_key, pid = cq.data.split(":")
     item = get_item(cat_key, pid)
     if not item:
@@ -1564,15 +1140,13 @@ async def cb_buy(cq: CallbackQuery):
 
     text = f"{T['confirm'][l]}\n\nProduct: {pname}\nPrice: {price_line}\nBalance: {b:.2f} USDT"
     await safe_edit(cq, text, reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-        [styled_button(text=T["confirm"][l], callback_data=f"confirm:{cat_key}:{pid}", style="success")],
-        [styled_button(text=T["back"][l], callback_data=f"view:{cat_key}:{pid}", style="danger")]
+        [InlineKeyboardButton(text=T["confirm"][l], callback_data=f"confirm:{cat_key}:{pid}")],
+        [InlineKeyboardButton(text=T["back"][l], callback_data=f"view:{cat_key}:{pid}")]
     ]))
     await cq.answer()
 
 @dp.callback_query(F.data.startswith("gift:"))
 async def cb_gift(cq: CallbackQuery):
-    if await block_if_banned(cq):
-        return
     _, cat_key, pid = cq.data.split(":")
     item = get_item(cat_key, pid)
     if not item:
@@ -1582,16 +1156,14 @@ async def cb_gift(cq: CallbackQuery):
     await safe_edit(cq, 
         f"{T['gift'][l]}\n\n{pname}\n\nTo send this as a gift, confirm the purchase then send the recipient details to support.",
         reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-            [styled_button(text=T["confirm"][l], callback_data=f"confirmgift:{cat_key}:{pid}", style="success")],
-            [styled_button(text=T["back"][l], callback_data=f"view:{cat_key}:{pid}", style="danger")]
+            [InlineKeyboardButton(text=T["confirm"][l], callback_data=f"confirmgift:{cat_key}:{pid}")],
+            [InlineKeyboardButton(text=T["back"][l], callback_data=f"view:{cat_key}:{pid}")]
         ])
     )
     await cq.answer()
 
 @dp.callback_query(F.data.startswith("confirmgift:"))
 async def cb_confirm_gift(cq: CallbackQuery):
-    if await block_if_banned(cq):
-        return
     _, cat_key, pid = cq.data.split(":")
     item = get_item(cat_key, pid)
     if not item:
@@ -1613,8 +1185,6 @@ async def cb_confirm_gift(cq: CallbackQuery):
 
 @dp.callback_query(F.data.startswith("confirm:"))
 async def cb_confirm(cq: CallbackQuery):
-    if await block_if_banned(cq):
-        return
     _, cat_key, pid = cq.data.split(":")
     item = get_item(cat_key, pid)
     if not item:
