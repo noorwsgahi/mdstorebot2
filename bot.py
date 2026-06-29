@@ -1,925 +1,1213 @@
-from __future__ import annotations
-
 import asyncio
-import csv
-import io
 import json
-import logging
-from datetime import datetime, timedelta, timezone
+import os
+import sqlite3
+from datetime import datetime, timedelta
 from pathlib import Path
+from typing import Any, Dict, List, Optional
 
-from aiogram import Bot, Dispatcher, F, Router
-from aiogram.client.default import DefaultBotProperties
-from aiogram.enums import ParseMode
+from aiogram import Bot, Dispatcher, F
+from aiogram.client.session.aiohttp import AiohttpSession
 from aiogram.filters import Command, CommandStart
-from aiogram.fsm.context import FSMContext
-from aiogram.fsm.state import State, StatesGroup
-from aiogram.types import CallbackQuery, FSInputFile, Message, ReplyKeyboardMarkup, KeyboardButton, InlineKeyboardMarkup, InlineKeyboardButton
+from aiogram.types import CallbackQuery, FSInputFile, InlineKeyboardButton, InlineKeyboardMarkup, Message, WebAppInfo
 from dotenv import load_dotenv
 
-from catalog import CATEGORIES, PARENT_MENUS, SUBCATEGORIES, FIXED_RATE_CATEGORIES
-from config import config
-import database as db
-import keyboards as kb
-
 load_dotenv()
-logging.basicConfig(level=logging.INFO)
-router = Router()
 
-class UserFlow(StatesGroup):
-    waiting_game_id = State()
-    waiting_payment_amount = State()
-    waiting_txid = State()
-    waiting_support = State()
+BASE_DIR = Path(__file__).resolve().parent
 
-class AdminFlow(StatesGroup):
-    waiting_broadcast = State()
+BOT_TOKEN = os.getenv("BOT_TOKEN", "").strip()
+BOT_NAME = os.getenv("BOT_NAME", "MD STORE Global")
+SUPPORT_USERNAME = os.getenv("SUPPORT_USERNAME", "@bot_MD_global")
+CHANNEL_URL = os.getenv("CHANNEL_URL", "https://t.me/MD_WEBSITE")
+WEB_APP_URL = os.getenv("WEB_APP_URL", "https://mdgiftshop-94hvjt93.manus.space/")
+WELCOME_PHOTO_PATH = os.getenv("WELCOME_PHOTO_PATH", "photo_2026-06-13_18-11-52.jpg")
+BYBIT_ID = os.getenv("BYBIT_ID", "524739312")
+USDT_BEP20_ADDRESS = os.getenv("USDT_BEP20_ADDRESS", "0xA2E0c2eC432953Dd2F832488a1EC061e6e761361")
+MIN_ORDER = float(os.getenv("MIN_ORDER_USDT", "50"))
 
-pending_products: dict[int, str] = {}
-pending_pay_method: dict[int, str] = {}
-
-BOT: Bot | None = None
-
-# ---------------- Prime Topup UI, custom icons, and translations ----------------
-# Telegram Bot API supports icon_custom_emoji_id for ReplyKeyboard and InlineKeyboard buttons in recent Bot API versions.
-# Keep the visible button text clean; Telegram shows the custom emoji before the text when the bot/account is eligible.
-CUSTOM_EMOJI = {
-    # Main menu / wallet icons
-    "voucher": "5987568986290657784",
-    "wallet": "5276137490846075469",
-    "orders": "6093382540784046658",
-    "game_id": "5303466028448127877",
-    "settings": "5366231924597604153",
-    "product_games": "5235606515833909907",
-    "about": "5303162314130758043",
-    "support": "5852800639188341430",
-    "balance": "5388622778817589921",
-
-    # Voucher / product category icons sent by admin
-    "roblox": "5388921730016240894",
-    "steam": "5318801707394695066",
-    "itunes": "5332512686112520612",
-    "pubg": "5314544952422704045",
-    "playstation": "5363934885893389858",
-    "razer": "5201873447554145566",
-    "yalla": "5911296461672289184",
-    "freefire": "6048398234441750217",
+SPECIAL_MIN_ORDERS = {
+    7781514279: 100.0,
+    358930912: 100.0,
 }
 
-CATEGORY_ICON_IDS = {
-    "roblox": CUSTOM_EMOJI["roblox"],
-    "steam": CUSTOM_EMOJI["steam"],
-    "itunes": CUSTOM_EMOJI["itunes"],
-    "ios": CUSTOM_EMOJI["itunes"],
-    "apple": CUSTOM_EMOJI["itunes"],
-    "pubg": CUSTOM_EMOJI["pubg"],
-    "playstation": CUSTOM_EMOJI["playstation"],
-    "psn": CUSTOM_EMOJI["playstation"],
-    "razer": CUSTOM_EMOJI["razer"],
-    "yalla": CUSTOM_EMOJI["yalla"],
-    "ludo": CUSTOM_EMOJI["yalla"],
-    "freefire": CUSTOM_EMOJI["freefire"],
-    "free_fire": CUSTOM_EMOJI["freefire"],
-    "garena": CUSTOM_EMOJI["freefire"],
-    "valorant": CUSTOM_EMOJI["product_games"],
-    "arena": CUSTOM_EMOJI["product_games"],
-    "baloot": CUSTOM_EMOJI["product_games"],
-    "zepeto": CUSTOM_EMOJI["product_games"],
-    "mobile": CUSTOM_EMOJI["product_games"],
-    "league": CUSTOM_EMOJI["product_games"],
+def get_min_order(user_id):
+    return SPECIAL_MIN_ORDERS.get(user_id, MIN_ORDER)
+DB = os.getenv("DATABASE_PATH", "md_store_bot.db")
+ADMIN_IDS = {int(x) for x in os.getenv("ADMIN_IDS", "7504221023").replace(" ", "").split(",") if x.isdigit()}
+
+if not BOT_TOKEN:
+    raise RuntimeError("BOT_TOKEN missing in .env or Railway Variables")
+
+PRODUCTS = json.loads(Path("products.json").read_text(encoding="utf-8"))
+
+session = AiohttpSession()
+bot = Bot(BOT_TOKEN, session=session)
+dp = Dispatcher()
+
+LANGS = {"ar": "العربية", "en": "English", "ru": "Русский"}
+
+T = {
+    "choose_lang": {
+        "ar": "اختر اللغة:",
+        "en": "Choose language:",
+        "ru": "Выберите язык:",
+    },
+    "welcome": {
+        "ar": "مرحبا بك في MD STORE\nمتجر البطاقات الرقمية وشحن الالعاب.\n\nنحن نوفر بطاقات رقمية وشحن العاب للتجار والعملاء.\nللكميات الكبيرة والتعاون طويل المدى تواصل مع الدعم.\n\nاختر من القائمة:",
+        "en": "Welcome to MD STORE\nDigital gift card marketplace.\n\nMD STORE supplies digital cards and game top-ups for traders and resellers.\nFor large quantities and long-term cooperation, contact support.\n\nChoose from the menu:",
+        "ru": "Добро пожаловать в MD STORE\nМаркетплейс цифровых подарочных карт.\n\nMD STORE поставляет цифровые карты и пополнения игр для клиентов и реселлеров.\nДля крупных заказов и долгосрочного сотрудничества свяжитесь с поддержкой.\n\nВыберите пункт меню:",
+    },
+    "shop": {"ar": "🛍 المتجر", "en": "🛍 Shop", "ru": "🛍 Магазин"},
+    "products": {"ar": "المنتجات", "en": "Products", "ru": "Товары"},
+    "special_offers": {"ar": "🎁 العروض", "en": "🎁 Special Offers", "ru": "🎁 Акции"},
+    "best_sellers": {"ar": "⭐ الاكثر مبيعا", "en": "⭐ Best Sellers", "ru": "⭐ Хиты продаж"},
+    "reviews": {"ar": "📝 المراجعات", "en": "📝 Reviews", "ru": "📝 Отзывы"},
+    "profile": {"ar": "👤 الحساب", "en": "👤 Profile", "ru": "👤 Профиль"},
+    "coupons": {"ar": "Coupons", "en": "Coupons", "ru": "Coupons"},
+    "wholesale": {"ar": "Wholesale Prices", "en": "Wholesale Prices", "ru": "Wholesale Prices"},
+    "topup": {"ar": "شحن الرصيد", "en": "Top Up Balance", "ru": "Пополнить баланс"},
+    "balance": {"ar": "💰 الرصيد", "en": "💰 Balance", "ru": "💰 Баланс"},
+    "cart": {"ar": "🛒 السلة", "en": "🛒 Cart", "ru": "🛒 Корзина"},
+    "favorites": {"ar": "❤️ المفضلة", "en": "❤️ Favorites", "ru": "❤️ Избранное"},
+    "orders": {"ar": "📦 طلباتي", "en": "📦 My Orders", "ru": "📦 Мои заказы"},
+    "latest": {"ar": "آخر عمليات الشراء", "en": "Latest Purchases", "ru": "Последние покупки"},
+    "support": {"ar": "💬 الدعم", "en": "💬 Support", "ru": "💬 Поддержка"},
+    "faq": {"ar": "الأسئلة الشائعة", "en": "FAQ", "ru": "FAQ"},
+    "referrals": {"ar": "👥 الاحالات", "en": "👥 Referrals", "ru": "👥 Рефералы"},
+    "copy_usdt": {"ar": "نسخ عنوان USDT", "en": "Copy USDT Address", "ru": "Скопировать USDT"},
+    "channel": {"ar": "📢 القناة الرسمية", "en": "📢 Official Channel", "ru": "📢 Официальный канал"},
+    "language": {"ar": "🌍 اللغة", "en": "🌍 Language", "ru": "🌍 Язык"},
+    "back": {"ar": "رجوع", "en": "Back", "ru": "Назад"},
+    "main": {"ar": "القائمة الرئيسية", "en": "Main Menu", "ru": "Главное меню"},
+    "category_text": {"ar": "اختر المنتج:", "en": "Choose product:", "ru": "Выберите товар:"},
+    "wallet": {
+        "ar": "رصيدك الحالي: {balance:.2f} USDT",
+        "en": "Your balance: {balance:.2f} USDT",
+        "ru": "Ваш баланс: {balance:.2f} USDT",
+    },
+    "need_balance": {
+        "ar": "رصيدك غير كافي لإجراء عمليات الشراء.\nيرجى شحن رصيد حسابك أولاً.",
+        "en": "Your balance is not enough to make purchases.\nPlease top up your account first.",
+        "ru": "Недостаточно средств для покупки.\nСначала пополните баланс.",
+    },
+    "min_order": {
+        "ar": "الحد الأدنى للطلب هو {min_order:.0f} USDT.",
+        "en": "The minimum order amount is {min_order:.0f} USDT.",
+        "ru": "Минимальная сумма заказа — {min_order:.0f} USDT.",
+    },
+    "pay": {
+        "ar": "لشحن الرصيد، أرسل الدفع ثم اضغط زر: تم الدفع.\nبعد ذلك تواصل مع الدعم وأرسل لقطة شاشة أو رابط/Hash الدفع.\n\nUSDT BEP20:\n{wallet}\n\nBybit ID:\n{bybit}\n\nالدعم: {support}",
+        "en": "To top up your balance, send the payment then press: I Have Paid.\nAfter that, contact support and send a screenshot or payment hash/link.\n\nUSDT BEP20:\n{wallet}\n\nBybit ID:\n{bybit}\n\nSupport: {support}",
+        "ru": "Для пополнения баланса отправьте оплату, затем нажмите: Я оплатил.\nПосле этого свяжитесь с поддержкой и отправьте скриншот или hash/ссылку платежа.\n\nUSDT BEP20:\n{wallet}\n\nBybit ID:\n{bybit}\n\nПоддержка: {support}",
+    },
+    "i_paid": {"ar": "تم الدفع", "en": "I Have Paid", "ru": "Я оплатил"},
+    "paid_sent": {
+        "ar": "تم إرسال إشعار الدفع إلى الإدارة.\nيرجى إرسال لقطة الشاشة أو Hash الدفع إلى الدعم.",
+        "en": "Your payment notice has been sent to admin.\nPlease send the screenshot or payment hash to support.",
+        "ru": "Уведомление об оплате отправлено администратору.\nОтправьте скриншот или hash платежа в поддержку.",
+    },
+    "buy_now": {"ar": "شراء الآن", "en": "Buy Now", "ru": "Купить сейчас"},
+    "add_cart": {"ar": "إضافة للسلة", "en": "Add to Cart", "ru": "В корзину"},
+    "add_fav": {"ar": "إضافة للمفضلة", "en": "Add to Favorites", "ru": "В избранное"},
+    "gift": {"ar": "إرسال كهدية", "en": "Send as Gift", "ru": "Отправить как подарок"},
+    "confirm": {"ar": "تأكيد الشراء", "en": "Confirm Purchase", "ru": "Подтвердить покупку"},
+    "order_done": {
+        "ar": "تم إنشاء طلبك بنجاح.\nسيتم التواصل معك للتسليم.",
+        "en": "Your order has been created successfully.\nYou will be contacted for delivery.",
+        "ru": "Ваш заказ успешно создан.\nС вами свяжутся для доставки.",
+    },
+    "added_cart": {"ar": "تمت الإضافة إلى السلة.", "en": "Added to cart.", "ru": "Добавлено в корзину."},
+    "added_fav": {"ar": "تمت الإضافة إلى المفضلة.", "en": "Added to favorites.", "ru": "Добавлено в избранное."},
+    "empty_cart": {"ar": "السلة فارغة.", "en": "Your cart is empty.", "ru": "Корзина пуста."},
+    "empty_fav": {"ar": "المفضلة فارغة.", "en": "Favorites are empty.", "ru": "Избранное пусто."},
+    "clear_cart": {"ar": "تفريغ السلة", "en": "Clear Cart", "ru": "Очистить корзину"},
+    "checkout": {"ar": "إتمام الطلب", "en": "Checkout", "ru": "Оформить заказ"},
+    "coupon_help": {
+        "ar": "لإضافة كوبون اكتب:\n/coupon CODE",
+        "en": "To apply coupon, send:\n/coupon CODE",
+        "ru": "Чтобы применить купон, отправьте:\n/coupon CODE",
+    },
+    "coupon_ok": {"ar": "تم تفعيل الكوبون.", "en": "Coupon applied.", "ru": "Купон применён."},
+    "coupon_bad": {"ar": "الكوبون غير صحيح أو غير مفعل.", "en": "Invalid or inactive coupon.", "ru": "Купон недействителен или неактивен."},
+    "no_orders": {"ar": "لا توجد طلبات حالياً.", "en": "No orders yet.", "ru": "Заказов пока нет."},
+    "no_latest": {"ar": "لا توجد عمليات شراء حالياً.", "en": "No purchases yet.", "ru": "Покупок пока нет."},
+    "admin_only": {"ar": "هذا الأمر للأدمن فقط.", "en": "This command is for admin only.", "ru": "Эта команда только для администратора."},
 }
 
-LABELS = {
-    # Reliable ReplyKeyboard: visible emoji in the button text (Product Games removed as requested).
-    "en": {
-        "voucher": "🛒 Voucher Products", "wallet": "💰 My Wallet", "orders": "📊 My Orders",
-        "gameid": "🆔 Game ID", "product_games": "🎲 Product Games", "language": "🌐 Languages",
-        "about": "ℹ️ About", "support": "☎️ Contact Support",
-    },
-    "ar": {
-        "voucher": "🛒 المنتجات", "wallet": "💰 محفظتي", "orders": "📊 طلباتي",
-        "gameid": "🆔 شحن ID", "product_games": "🎲 منتجات الألعاب", "language": "🌐 اللغات",
-        "about": "ℹ️ حول البوت", "support": "☎️ الدعم",
-    },
-    "ru": {
-        "voucher": "🛒 Товары", "wallet": "💰 Кошелёк", "orders": "📊 Заказы",
-        "gameid": "🆔 Game ID", "product_games": "🎲 Игры", "language": "🌐 Языки",
-        "about": "ℹ️ О боте", "support": "☎️ Поддержка",
-    },
-    "my": {
-        "voucher": "🛒 Products", "wallet": "💰 Wallet", "orders": "📊 Orders",
-        "gameid": "🆔 Game ID", "product_games": "🎲 Games", "language": "🌐 Languages",
-        "about": "ℹ️ About", "support": "☎️ Support",
-    },
-    "az": {
-        "voucher": "🛒 Məhsullar", "wallet": "💰 Pul kisəsi", "orders": "📊 Sifarişlər",
-        "gameid": "🆔 Game ID", "product_games": "🎲 Oyunlar", "language": "🌐 Dillər",
-        "about": "ℹ️ Haqqında", "support": "☎️ Dəstək",
-    },
-}
-TEXTS = {
-    "en": {
-        "start": "Welcome to <b>Prime Topup</b>! 🎮\n\nChoose an option from the menu below.",
-        "voucher_title": "Voucher Products\n\n📂 Select Category:\n✨ 📊 Select one:",
-        "game_title": "Select Topup Game:\n\nTotal active game categories found. Select one:",
-        "choose_lang": "🌐 Choose Language",
-        "lang_saved": "✅ Language saved.",
-        "no_orders": "📦 You have no orders yet.",
-        "generic": "Please choose an option from the menu.",
-        "support_sent": "✅ Your message has been sent to support.",
-        "no_balance": "❌ You do not have enough balance. Please top up your wallet.",
-        "processing": "⏳ Your order is being processed. You'll be notified once it's complete.",
-    },
-    "ar": {
-        "start": "مرحباً بك في <b>Prime Topup</b>! 🎮\n\nاختر خياراً من القائمة بالأسفل.",
-        "voucher_title": "منتجات البطاقات\n\n📂 اختر القسم:\n✨ 📊 اختر واحداً:",
-        "game_title": "اختر لعبة الشحن:\n\nتم العثور على أقسام شحن نشطة. اختر واحداً:",
-        "choose_lang": "🌐 اختر اللغة",
-        "lang_saved": "✅ تم حفظ اللغة.",
-        "no_orders": "📦 لا يوجد لديك طلبات حتى الآن.",
-        "generic": "يرجى اختيار خيار من القائمة.",
-        "support_sent": "✅ تم إرسال رسالتك للدعم.",
-        "no_balance": "❌ ليس لديك رصيد كافٍ. يرجى شحن محفظتك أولاً.",
-        "processing": "⏳ طلبك قيد المعالجة. سيتم إشعارك عند اكتماله.",
-    },
-    "ru": {
-        "start": "Добро пожаловать в <b>Prime Topup</b>! 🎮\n\nВыберите пункт в меню ниже.",
-        "voucher_title": "Цифровые товары\n\n📂 Выберите категорию:\n✨ 📊 Выберите один вариант:",
-        "game_title": "Выберите игру для пополнения:\n\nНайдены активные категории. Выберите одну:",
-        "choose_lang": "🌐 Выберите язык",
-        "lang_saved": "✅ Язык сохранён.",
-        "no_orders": "📦 У вас пока нет заказов.",
-        "generic": "Пожалуйста, выберите пункт меню.",
-        "support_sent": "✅ Ваше сообщение отправлено в поддержку.",
-        "no_balance": "❌ Недостаточно средств. Пополните кошелёк.",
-        "processing": "⏳ Ваш заказ обрабатывается. Мы уведомим вас после завершения.",
-    },
-    "my": {
-        "start": "<b>Prime Topup</b> မှ ကြိုဆိုပါတယ်! 🎮\n\nအောက်ပါ menu မှရွေးချယ်ပါ။",
-        "voucher_title": "Voucher Products\n\n📂 Category ရွေးပါ:\n✨ 📊 တစ်ခုရွေးပါ:",
-        "game_title": "Topup Game ရွေးပါ:\n\nActive categories တွေ့ရှိပါသည်။ တစ်ခုရွေးပါ:",
-        "choose_lang": "🌐 Language ရွေးပါ",
-        "lang_saved": "✅ Language saved.",
-        "no_orders": "📦 Orders မရှိသေးပါ။",
-        "generic": "Menu မှရွေးချယ်ပါ။",
-        "support_sent": "✅ Support သို့ပို့ပြီးပါပြီ။",
-        "no_balance": "❌ Balance မလုံလောက်ပါ။ Wallet ကို top up လုပ်ပါ။",
-        "processing": "⏳ Your order is being processed. You'll be notified once it's complete.",
-    },
-    "az": {
-        "start": "<b>Prime Topup</b>-a xoş gəlmisiniz! 🎮\n\nAşağıdakı menyudan seçim edin.",
-        "voucher_title": "Voucher Products\n\n📂 Kateqoriya seçin:\n✨ 📊 Birini seçin:",
-        "game_title": "Topup oyununu seçin:\n\nAktiv kateqoriyalar tapıldı. Birini seçin:",
-        "choose_lang": "🌐 Dil seçin",
-        "lang_saved": "✅ Dil yadda saxlanıldı.",
-        "no_orders": "📦 Hələ sifarişiniz yoxdur.",
-        "generic": "Zəhmət olmasa menyudan seçim edin.",
-        "support_sent": "✅ Mesajınız dəstəyə göndərildi.",
-        "no_balance": "❌ Balansınız kifayət deyil. Zəhmət olmasa cüzdanınızı artırın.",
-        "processing": "⏳ Sifarişiniz emal olunur. Tamamlandıqda sizə bildiriləcək.",
-    },
-}
+def conn():
+    c = sqlite3.connect(DB)
+    c.row_factory = sqlite3.Row
+    return c
 
-def icon(name: str, fallback: str) -> str:
-    return f'<tg-emoji emoji-id="{CUSTOM_EMOJI[name]}">{fallback}</tg-emoji>'
+def init_db():
+    with conn() as c:
+        c.execute("""CREATE TABLE IF NOT EXISTS users(
+            user_id INTEGER PRIMARY KEY,
+            username TEXT,
+            first_name TEXT,
+            lang TEXT DEFAULT 'en',
+            balance REAL DEFAULT 0,
+            active_coupon TEXT DEFAULT '',
+            created_at TEXT
+        )""")
+        c.execute("""CREATE TABLE IF NOT EXISTS orders(
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER,
+            username TEXT,
+            product TEXT,
+            price REAL,
+            status TEXT DEFAULT 'pending',
+            gift_to TEXT DEFAULT '',
+            created_at TEXT
+        )""")
+        c.execute("""CREATE TABLE IF NOT EXISTS cart(
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER,
+            cat_key TEXT,
+            product_id TEXT,
+            quantity INTEGER DEFAULT 1,
+            created_at TEXT
+        )""")
+        c.execute("""CREATE TABLE IF NOT EXISTS favorites(
+            user_id INTEGER,
+            cat_key TEXT,
+            product_id TEXT,
+            created_at TEXT,
+            PRIMARY KEY(user_id, cat_key, product_id)
+        )""")
+        c.execute("""CREATE TABLE IF NOT EXISTS coupons(
+            code TEXT PRIMARY KEY,
+            discount REAL DEFAULT 0,
+            active INTEGER DEFAULT 1,
+            created_at TEXT
+        )""")
+        c.execute("""CREATE TABLE IF NOT EXISTS payment_requests(
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER,
+            username TEXT,
+            status TEXT DEFAULT 'pending',
+            created_at TEXT
+        )""")
+        c.execute("""CREATE TABLE IF NOT EXISTS settings(
+            key TEXT PRIMARY KEY,
+            value TEXT
+        )""")
+        c.execute("""CREATE TABLE IF NOT EXISTS referrals(
+            invited_id INTEGER PRIMARY KEY,
+            referrer_id INTEGER,
+            created_at TEXT
+        )""")
 
-async def get_lang(user_id: int | None) -> str:
-    if not user_id:
-        return "en"
-    try:
-        u = await db.get_user(user_id)
-        lang = (u["language"] if u and u["language"] else "en")
-        return lang if lang in TEXTS else "en"
-    except Exception:
-        return "en"
+        # Safe migrations for old database versions on Railway.
+        # CREATE TABLE IF NOT EXISTS does not add new columns to existing tables,
+        # so we add missing columns manually.
+        user_cols = {row[1] for row in c.execute("PRAGMA table_info(users)").fetchall()}
+        if "active_coupon" not in user_cols:
+            c.execute("ALTER TABLE users ADD COLUMN active_coupon TEXT DEFAULT ''")
+        if "created_at" not in user_cols:
+            c.execute("ALTER TABLE users ADD COLUMN created_at TEXT")
+        if "referred_by" not in user_cols:
+            c.execute("ALTER TABLE users ADD COLUMN referred_by INTEGER DEFAULT 0")
+        if "referral_earnings" not in user_cols:
+            c.execute("ALTER TABLE users ADD COLUMN referral_earnings REAL DEFAULT 0")
 
-async def tr(user_id: int | None, key: str) -> str:
-    lang = await get_lang(user_id)
-    return TEXTS.get(lang, TEXTS["en"]).get(key, TEXTS["en"].get(key, key))
+        order_cols = {row[1] for row in c.execute("PRAGMA table_info(orders)").fetchall()}
+        if "gift_to" not in order_cols:
+            c.execute("ALTER TABLE orders ADD COLUMN gift_to TEXT DEFAULT ''")
+        if "created_at" not in order_cols:
+            c.execute("ALTER TABLE orders ADD COLUMN created_at TEXT")
 
-def _button_rows(labels: dict[str, str]):
-    # Product Games button removed from the bottom keyboard as requested.
-    return [
-        [rk_button(labels["voucher"]), rk_button(labels["wallet"])],
-        [rk_button(labels["orders"]), rk_button(labels["gameid"])],
-        [rk_button(labels["language"]), rk_button(labels["about"])],
-        [rk_button(labels["support"])],
-    ]
+        c.commit()
 
-def main_menu_lang(lang: str = "en") -> ReplyKeyboardMarkup:
-    labels = LABELS.get(lang, LABELS["en"])
-    return ReplyKeyboardMarkup(keyboard=_button_rows(labels), resize_keyboard=True)
+def ensure(u, referrer_id: int = 0):
+    with conn() as c:
+        r = c.execute("SELECT user_id, referred_by FROM users WHERE user_id=?", (u.id,)).fetchone()
+        if not r:
+            valid_ref = int(referrer_id) if referrer_id and int(referrer_id) != int(u.id) else 0
+            c.execute(
+                "INSERT INTO users(user_id, username, first_name, lang, balance, active_coupon, created_at, referred_by, referral_earnings) VALUES(?,?,?,?,?,?,?,?,?)",
+                (u.id, u.username or "", u.first_name or "", "en", 0.0, "", datetime.utcnow().isoformat(), valid_ref, 0.0),
+            )
+            if valid_ref:
+                c.execute(
+                    "INSERT OR IGNORE INTO referrals(invited_id, referrer_id, created_at) VALUES(?,?,?)",
+                    (u.id, valid_ref, datetime.utcnow().isoformat()),
+                )
+        else:
+            c.execute("UPDATE users SET username=?, first_name=? WHERE user_id=?", (u.username or "", u.first_name or "", u.id))
+        c.commit()
 
-def _strip_button_emoji(text: str) -> str:
-    # Accept old and new keyboard labels. This removes the leading emoji + space only.
-    parts = text.split(" ", 1)
-    if len(parts) == 2 and not parts[0].isalnum():
-        return parts[1]
-    return text
+def user(uid):
+    with conn() as c:
+        return c.execute("SELECT * FROM users WHERE user_id=?", (uid,)).fetchone()
 
-def all_labels(key: str) -> set[str]:
-    # Users send the visible text when pressing a keyboard button.
-    vals = {v[key] for v in LABELS.values()}
-    vals |= {_strip_button_emoji(v) for v in vals}
-    return vals
+def lang(uid):
+    u = user(uid)
+    return u["lang"] if u and u["lang"] else "en"
 
-def _clean_key(value: str) -> str:
-    return "".join(ch.lower() if ch.isalnum() else "_" for ch in str(value)).strip("_")
+def txt(uid, key, **kw):
+    return T[key][lang(uid)].format(**kw)
 
-def category_icon_id(cat_key: str, title: str | None = None) -> str | None:
-    haystack = f"{cat_key} {title or ''}".lower()
-    haystack_clean = _clean_key(haystack)
-    for key, icon_id in CATEGORY_ICON_IDS.items():
-        if key in haystack or key in haystack_clean:
-            return icon_id
+def admin(uid):
+    return uid in ADMIN_IDS
+
+def set_lang(uid, l):
+    with conn() as c:
+        c.execute("UPDATE users SET lang=? WHERE user_id=?", (l, uid))
+        c.commit()
+
+def add_balance(uid, amount):
+    with conn() as c:
+        c.execute(
+            "INSERT OR IGNORE INTO users(user_id, username, first_name, lang, balance, active_coupon, created_at) VALUES(?,?,?,?,?,?,?)",
+            (uid, "", "", "en", 0.0, "", datetime.utcnow().isoformat()),
+        )
+        c.execute("UPDATE users SET balance=balance+? WHERE user_id=?", (amount, uid))
+        c.commit()
+
+def set_balance(uid, amount):
+    with conn() as c:
+        c.execute("UPDATE users SET balance=? WHERE user_id=?", (amount, uid))
+        c.commit()
+
+def remove_balance(uid, amount):
+    with conn() as c:
+        c.execute("UPDATE users SET balance=MAX(balance-?,0) WHERE user_id=?", (amount, uid))
+        c.commit()
+
+def iter_items(cat_key):
+    items = PRODUCTS.get(cat_key, {}).get("items", [])
+    normalized = []
+    for item in items:
+        if isinstance(item, dict):
+            normalized.append({"id": str(item.get("id")), "label": str(item.get("label")), "price": item.get("price")})
+        elif isinstance(item, (list, tuple)) and len(item) >= 3:
+            normalized.append({"id": str(item[0]), "label": str(item[1]), "price": item[2]})
+    return normalized
+
+def get_item(cat_key, pid):
+    for item in iter_items(cat_key):
+        if item["id"] == pid:
+            return item
     return None
 
-def category_style(cat_key: str, title: str | None = None) -> str:
-    # Telegram Bot API button styles: primary = blue, danger = red, success = green.
-    return "primary"
+def cat_name(cat_key, l):
+    cat = PRODUCTS.get(cat_key, {})
+    return cat.get(l, cat.get("en", cat_key))
 
-def rk_button(text: str, icon_id: str | None = None) -> KeyboardButton:
-    # icon_custom_emoji_id requires recent Bot API / aiogram. If unsupported by the account, Telegram may ignore the icon.
-    kwargs = {"text": text}
-    if icon_id:
-        kwargs["icon_custom_emoji_id"] = icon_id
-    return KeyboardButton(**kwargs)
+def product_name(cat_key, item, l):
+    return f"{cat_name(cat_key, l)} {item['label']}"
 
-def ik_button(text: str, callback_data: str, icon_id: str | None = None, style: str | None = None) -> InlineKeyboardButton:
-    kwargs = {"text": text, "callback_data": callback_data}
-    if icon_id:
-        kwargs["icon_custom_emoji_id"] = icon_id
-    if style:
-        kwargs["style"] = style
-    return InlineKeyboardButton(**kwargs)
+def price_text(price):
+    return "Available" if price is None else f"{float(price):.2f} USDT"
 
-def _patch_keyboards():
-    def main_menu():
-        # default menu; translated menu is sent after language changes
-        return main_menu_lang("en")
+def get_setting(key: str, default: str = "") -> str:
+    with conn() as c:
+        row = c.execute("SELECT value FROM settings WHERE key=?", (key,)).fetchone()
+    return row["value"] if row else default
 
-    def voucher_categories():
-        rows = []
-        for cat in PARENT_MENUS.get("voucher", []):
-            title = CATEGORIES.get(cat, cat)
-            rows.append([ik_button(title, f"cat:{cat}", category_icon_id(cat, title), "primary")])
-        rows.append([ik_button("Back", "home", style="danger")])
-        return InlineKeyboardMarkup(inline_keyboard=rows)
+def set_setting(key: str, value: str):
+    with conn() as c:
+        c.execute("INSERT OR REPLACE INTO settings(key, value) VALUES(?,?)", (key, value))
+        c.commit()
 
-    def game_categories():
-        rows = []
-        for cat in PARENT_MENUS.get("gameid", []):
-            title = CATEGORIES.get(cat, cat)
-            rows.append([ik_button(title, f"cat:{cat}", category_icon_id(cat, title), "primary")])
-        rows.append([ik_button("Back", "home", style="danger")])
-        return InlineKeyboardMarkup(inline_keyboard=rows)
+def start_flash_discount(percent: float = 2.0, hours: int = 24):
+    until = (datetime.utcnow() + timedelta(hours=hours)).isoformat()
+    set_setting("flash_discount_percent", str(percent))
+    set_setting("flash_discount_until", until)
+    return until
 
-    def subcats(parent: str):
-        rows = []
-        for cat in SUBCATEGORIES.get(parent, []):
-            title = CATEGORIES.get(cat, cat)
-            rows.append([ik_button(title, f"cat:{cat}", category_icon_id(cat, title), "primary")])
-        rows.append([ik_button("Back", "voucher", style="danger")])
-        return InlineKeyboardMarkup(inline_keyboard=rows)
+def get_flash_discount():
+    try:
+        until_raw = get_setting("flash_discount_until", "")
+        percent = float(get_setting("flash_discount_percent", "0") or 0)
+        if not until_raw or percent <= 0:
+            return "", 0.0
+        until = datetime.fromisoformat(until_raw)
+        if datetime.utcnow() >= until:
+            set_setting("flash_discount_percent", "0")
+            return "", 0.0
+        return "24H_DISCOUNT", percent
+    except Exception:
+        return "", 0.0
 
-    def products_keyboard(products, parent_back: str):
-        rows = []
-        for r in products:
-            price = round(float(r["base_price"]) * float(r["rate"]) / 100, 2)
-            title = str(r["title"])
-            # clean product button style: no stock, only Available
-            rows.append([ik_button(f"{title} | {price:.2f} USDT | ✅ Available", f"buy:{r['id']}", style="primary")])
-        rows.append([ik_button("Back", parent_back, style="danger")])
-        return InlineKeyboardMarkup(inline_keyboard=rows)
+def get_discount(uid):
+    flash_code, flash_percent = get_flash_discount()
+    u = user(uid)
+    code = (u["active_coupon"] if u and "active_coupon" in u.keys() else "") or ""
+    coupon_code, coupon_percent = "", 0.0
+    if code:
+        with conn() as c:
+            row = c.execute("SELECT * FROM coupons WHERE code=? AND active=1", (code.upper(),)).fetchone()
+        if row:
+            coupon_code, coupon_percent = row["code"], float(row["discount"])
+    if flash_percent >= coupon_percent and flash_percent > 0:
+        return flash_code, flash_percent
+    if coupon_percent > 0:
+        return coupon_code, coupon_percent
+    return "", 0.0
 
-    def wallet_keyboard():
-        return InlineKeyboardMarkup(inline_keyboard=[
-            [ik_button("USDT BEP20", "pay:BEP20", CUSTOM_EMOJI["wallet"], "primary"), ik_button("USDT TRC20", "pay:TRC20", CUSTOM_EMOJI["wallet"], "primary")],
-            [ik_button("Bybit ID", "pay:BYBIT", CUSTOM_EMOJI["game_id"], "primary")],
-            [ik_button("Transaction History", "txhistory", CUSTOM_EMOJI["orders"], "success")],
-            [ik_button("Back to Menu", "home", style="danger")],
-        ])
+def apply_discount(uid, amount):
+    code, percent = get_discount(uid)
+    if not code or amount <= 0:
+        return amount, "", 0.0
+    discount_amount = amount * (percent / 100.0)
+    final = max(amount - discount_amount, 0)
+    return final, code, percent
 
-    def langs_keyboard():
-        return InlineKeyboardMarkup(inline_keyboard=[
-            [ik_button("العربية", "lang:ar", CUSTOM_EMOJI["settings"])],
-            [ik_button("English", "lang:en", CUSTOM_EMOJI["settings"])],
-            [ik_button("Русский", "lang:ru", CUSTOM_EMOJI["settings"])],
-            [ik_button("မြန်မာ", "lang:my", CUSTOM_EMOJI["settings"])],
-            [ik_button("Azərbaycan", "lang:az", CUSTOM_EMOJI["settings"])],
-            [ik_button("Cancel", "home", style="danger")],
-        ])
-
-    def invoice_keyboard(method: str):
-        return InlineKeyboardMarkup(inline_keyboard=[
-            [ik_button("Copy Address", f"copy:{method}", style="success")],
-            [ik_button("Cancel", "cancelpay", style="danger")],
-        ])
-
-    kb.main_menu = main_menu
-    kb.voucher_categories = voucher_categories
-    kb.game_categories = game_categories
-    kb.subcats = subcats
-    kb.products_keyboard = products_keyboard
-    kb.wallet_keyboard = wallet_keyboard
-    kb.langs_keyboard = langs_keyboard
-    kb.invoice_keyboard = invoice_keyboard
-
-_patch_keyboards()
-
-
-def admin_only(message: Message) -> bool:
-    return message.from_user and message.from_user.id == config.admin_id
-
-async def notify_admin(text: str, reply_markup=None):
-    if BOT:
-        try:
-            await BOT.send_message(config.admin_id, text, reply_markup=reply_markup)
-        except Exception as e:
-            logging.warning("admin notify failed: %s", e)
-
-async def user_guard(message: Message) -> bool:
-    if not message.from_user:
-        return False
-    new = await db.create_or_update_user(message.from_user)
-    if new and message.from_user.id != config.admin_id:
-        await notify_admin(
-            f"🆕 New user started bot\n\n"
-            f"ID: <code>{message.from_user.id}</code>\n"
-            f"Name: {message.from_user.first_name or '-'}\n"
-            f"Username: @{message.from_user.username if message.from_user.username else '-'}"
-        )
-    u = await db.get_user(message.from_user.id)
-    if u and u["is_banned"]:
-        await message.answer("⛔ You are banned.")
-        return False
-    return True
-
-@router.message(CommandStart())
-async def start(message: Message):
-    if not await user_guard(message): return
-    lang = await get_lang(message.from_user.id)
-    await message.answer(
-        await tr(message.from_user.id, "start"),
-        reply_markup=main_menu_lang(lang)
-    )
-
-@router.message(F.text.in_(all_labels("voucher")))
-async def voucher(message: Message):
-    if not await user_guard(message): return
-    await message.answer(await tr(message.from_user.id, "voucher_title"), reply_markup=kb.voucher_categories())
-
-@router.message(F.text.in_(all_labels("gameid")))
-async def game_id(message: Message):
-    if not await user_guard(message): return
-    await message.answer(await tr(message.from_user.id, "game_title"), reply_markup=kb.game_categories())
-
-@router.message(F.text.in_(all_labels("wallet")))
-async def wallet(message: Message):
-    if not await user_guard(message): return
-    u = await db.get_user(message.from_user.id)
-    bal = float(u["balance"] or 0) if u else 0
-    text = (
-        '<tg-emoji emoji-id="5276137490846075469">👛</tg-emoji> <b>Your Wallet Information</b>\n'
-        '<tg-emoji emoji-id="5987568986290657784">🎮</tg-emoji> '
-        f"Hello, {message.from_user.first_name or 'User'}! Here’s your current balance:\n\n"
-        '<tg-emoji emoji-id="5303466028448127877">🔤</tg-emoji> <b>Telegram ID:</b>\n'
-        f"<code>{message.from_user.id}</code>\n\n"
-        '<tg-emoji emoji-id="5388622778817589921">💰</tg-emoji> <b>Current Balance:</b>\n'
-        f"<code>{bal:.4f} $</code>\n"
-        '<tg-emoji emoji-id="6093382540784046658">📊</tg-emoji> ✨ What would you like to do next? '
-        "You can top up your balance using one of the following methods:"
-    )
-    await message.answer(text, reply_markup=kb.wallet_keyboard())
-
-@router.message(F.text.in_(all_labels("orders")))
-async def my_orders(message: Message):
-    if not await user_guard(message): return
-    rows = await db.recent_orders(message.from_user.id)
-    if not rows:
-        await message.answer(await tr(message.from_user.id, "no_orders"))
+def add_referral_commission(buyer_id: int, amount: float, percent: float = 3.0):
+    u = user(buyer_id)
+    if not u or "referred_by" not in u.keys():
         return
-    text = "📦 <b>My Orders</b>\n\n" + "\n\n".join(
-        f"#{r['id']} | {r['title']}\n💰 {float(r['price']):.2f} USDT | {r['status']}\n📅 {r['created_at'].strftime('%d.%m.%Y %H:%M')}"
-        for r in rows
-    )
-    await message.answer(text)
+    referrer = int(u["referred_by"] or 0)
+    if not referrer or referrer == buyer_id or amount <= 0:
+        return
+    commission = round(amount * (percent / 100.0), 2)
+    with conn() as c:
+        c.execute("UPDATE users SET balance=balance+?, referral_earnings=referral_earnings+? WHERE user_id=?", (commission, commission, referrer))
+        c.commit()
 
-@router.message(F.text.in_(all_labels("language")))
-async def language(message: Message):
-    if not await user_guard(message): return
-    await message.answer(await tr(message.from_user.id, "choose_lang"), reply_markup=kb.langs_keyboard())
+def referral_stats(uid: int):
+    with conn() as c:
+        invited = c.execute("SELECT COUNT(*) AS n FROM referrals WHERE referrer_id=?", (uid,)).fetchone()["n"]
+        u = c.execute("SELECT referral_earnings FROM users WHERE user_id=?", (uid,)).fetchone()
+    earnings = float(u["referral_earnings"] or 0.0) if u else 0.0
+    return invited, earnings
 
-@router.message(F.text.in_(all_labels("about")))
-async def about(message: Message):
-    await message.answer(
-        f'{icon("about", "‼️")} <b>About Prime Topup</b>\n\n'
-        'Prime Topup is a digital service bot for game top-ups, voucher codes, and gift cards.\n\n'
-        '<b>How it works:</b>\n'
-        '1. Top up your wallet using USDT BEP20, USDT TRC20, or Bybit.\n'
-        '2. Choose the product or game recharge you need.\n'
-        '3. Pay from your wallet balance.\n'
-        '4. Your order will be processed and you will be notified once it is complete.\n\n'
-        '<b>Important information:</b>\n'
-        '✅ All codes are original and safe.\n'
-        '✅ Voucher codes are valid for storage up to 1 year.\n'
-        '✅ Game ID orders are processed fast.\n'
-        '✅ Wallet balance is used for all purchases.\n'
-        '✅ You can track your orders and payment transactions inside the bot.\n'
-        '✅ Multi-language support is available.\n\n'
-        '<b>Support:</b>\n'
-        f'For help, contact {config.support_username}\n'
-        f'Official channel: {config.channel_url}'
-    )
+def kb_lang():
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text=v, callback_data=f"lang:{k}")]
+        for k, v in LANGS.items()
+    ])
 
-@router.message(F.text.in_(all_labels("support")))
-async def support(message: Message, state: FSMContext):
-    await message.answer(
-        f"📞 <b>Contact Support</b>\n\n"
-        f"👤 Telegram Support\n{config.support_username}\n\n"
-        f"📢 Official Channel\n{config.channel_url}\n\n"
-        "You can also send your message here and the admin will receive it."
-    )
-    await state.set_state(UserFlow.waiting_support)
+def web_reviews_url():
+    base = WEB_APP_URL.rstrip("/")
+    return f"{base}/#reviews"
 
-@router.message(UserFlow.waiting_support)
-async def support_msg(message: Message, state: FSMContext):
-    await notify_admin(
-        f"📩 Support message\nFrom: <code>{message.from_user.id}</code> @{message.from_user.username or '-'}\n\n{message.text or '[non-text message]'}"
-    )
-    await message.answer(await tr(message.from_user.id, "support_sent"))
-    await state.clear()
+def kb_main(uid):
+    l = lang(uid)
+    rows = [
+        [InlineKeyboardButton(text=T["shop"][l], web_app=WebAppInfo(url=WEB_APP_URL))],
+        [InlineKeyboardButton(text=T["products"][l], callback_data="shop")],
+        [InlineKeyboardButton(text=T["special_offers"][l], callback_data="special_offers"), InlineKeyboardButton(text=T["best_sellers"][l], callback_data="best_sellers")],
+        [InlineKeyboardButton(text=T["orders"][l], callback_data="orders"), InlineKeyboardButton(text=T["balance"][l], callback_data="balance")],
+        [InlineKeyboardButton(text=T["cart"][l], callback_data="cart"), InlineKeyboardButton(text=T["favorites"][l], callback_data="favorites")],
+        [InlineKeyboardButton(text=T["profile"][l], callback_data="profile"), InlineKeyboardButton(text=T["language"][l], callback_data="choose_lang")],
+        [InlineKeyboardButton(text=T["referrals"][l], callback_data="referrals"), InlineKeyboardButton(text=T["reviews"][l], web_app=WebAppInfo(url=web_reviews_url()))],
+        [InlineKeyboardButton(text=T["support"][l], callback_data="support"), InlineKeyboardButton(text=T["channel"][l], url=CHANNEL_URL)],
+    ]
+    return InlineKeyboardMarkup(inline_keyboard=rows)
 
-@router.callback_query(F.data == "home")
-async def cb_home(call: CallbackQuery):
-    lang = await get_lang(call.from_user.id)
-    await call.message.answer("Main menu", reply_markup=main_menu_lang(lang))
-    await call.answer()
+def kb_cats(uid):
+    l = lang(uid)
+    rows = []
+    for k, v in PRODUCTS.items():
+        rows.append([InlineKeyboardButton(text=v.get(l, v.get("en", k)), callback_data=f"cat:{k}")])
+    rows.append([InlineKeyboardButton(text=T["back"][l], callback_data="main")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
 
-@router.callback_query(F.data == "voucher")
-async def cb_voucher(call: CallbackQuery):
-    await call.message.edit_text(await tr(call.from_user.id, "voucher_title"), reply_markup=kb.voucher_categories())
-    await call.answer()
+def kb_items(uid, cat_key):
+    l = lang(uid)
+    rows = []
+    for item in iter_items(cat_key):
+        rows.append([InlineKeyboardButton(text=f"{item['label']} - {price_text(item['price'])}", callback_data=f"view:{cat_key}:{item['id']}")])
+    rows.append([InlineKeyboardButton(text=T["back"][l], callback_data="shop")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
 
-@router.callback_query(F.data.startswith("cat:"))
-async def cb_category(call: CallbackQuery):
-    cat = call.data.split(":",1)[1]
-    if cat in SUBCATEGORIES:
-        msg = f"{CATEGORIES[cat]}\n📂 Select Category:\n\n✨ 📊 Total {len(SUBCATEGORIES[cat])} active subcategories found. Select one:"
-        await call.message.edit_text(msg, reply_markup=kb.subcats(cat))
-        await call.answer(); return
-    products = await db.get_products(cat)
-    if not products:
-        await call.answer("No products available", show_alert=True); return
-    parent_back = "gameid" if cat in PARENT_MENUS["gameid"] else "voucher"
-    title = CATEGORIES.get(cat, cat)
-    await call.message.edit_text(
-        f"{title}\n\n✨ Here are some amazing products we have for you:",
-        reply_markup=kb.products_keyboard(products, parent_back)
-    )
-    await call.answer()
+def kb_product_actions(uid, cat_key, pid):
+    l = lang(uid)
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text=T["buy_now"][l], callback_data=f"buy:{cat_key}:{pid}")],
+        [InlineKeyboardButton(text=T["add_cart"][l], callback_data=f"addcart:{cat_key}:{pid}")],
+        [InlineKeyboardButton(text=T["add_fav"][l], callback_data=f"addfav:{cat_key}:{pid}")],
+        [InlineKeyboardButton(text=T["gift"][l], callback_data=f"gift:{cat_key}:{pid}")],
+        [InlineKeyboardButton(text=T["back"][l], callback_data=f"cat:{cat_key}")],
+    ])
 
-@router.callback_query(F.data == "gameid")
-async def cb_gameid(call: CallbackQuery):
-    await call.message.edit_text(await tr(call.from_user.id, "game_title"), reply_markup=kb.game_categories())
-    await call.answer()
+def payment_keyboard(uid):
+    l = lang(uid)
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text=T["copy_usdt"][l], callback_data="copy_usdt")],
+        [InlineKeyboardButton(text=T["i_paid"][l], callback_data="paid")],
+        [InlineKeyboardButton(text=SUPPORT_USERNAME, url=f"https://t.me/{SUPPORT_USERNAME.replace('@','')}")],
+        [InlineKeyboardButton(text=T["back"][l], callback_data="main")],
+    ])
 
-@router.callback_query(F.data.startswith("buy:"))
-async def cb_buy(call: CallbackQuery, state: FSMContext):
-    product_id = call.data.split(":",1)[1]
-    product = await db.get_product(product_id)
-    if not product:
-        await call.answer("Product unavailable", show_alert=True); return
-    price = round(float(product["base_price"]) * float(product["rate"]) / 100, 2)
-    if product["ask_game_id"]:
-        pending_products[call.from_user.id] = product_id
-        await call.message.answer(f"{product['title']}\n💰 Price: {price:.2f} USDT\n\n📝 Enter your Game ID number:")
-        await state.set_state(UserFlow.waiting_game_id)
-    else:
-        order = await db.create_order(call.from_user.id, product_id, product["title"], price)
-        if not order:
-            await call.message.answer(await tr(call.from_user.id, "no_balance"))
-        elif isinstance(order, dict) and order.get("error") == "MIN":
-            await call.message.answer(f"❌ Minimum purchase amount: {float(order['minimum']):.2f} USDT")
+def main_back_keyboard(uid):
+    l = lang(uid)
+    return InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text=T["main"][l], callback_data="main")]])
+
+async def safe_edit(cq: CallbackQuery, text: str, reply_markup=None, **kwargs):
+    """Edit the current bot message without deleting it, so buttons feel fast and smooth."""
+    try:
+        if cq.message and cq.message.photo:
+            await cq.message.edit_caption(caption=text, reply_markup=reply_markup, **kwargs)
         else:
-            await call.message.answer(await tr(call.from_user.id, "processing"))
-            await notify_admin(
-                f"🆕 New voucher order\n"
-                f"Order: #{order['id']}\nUser: <code>{call.from_user.id}</code> @{call.from_user.username or '-'}\n"
-                f"Product: {product['title']}\nPrice: {price:.2f} USDT\n\nReply: /reply {call.from_user.id} MESSAGE"
-            )
-    await call.answer()
-
-@router.message(UserFlow.waiting_game_id)
-async def got_game_id(message: Message, state: FSMContext):
-    product_id = pending_products.pop(message.from_user.id, None)
-    if not product_id:
-        await state.clear(); return
-    product = await db.get_product(product_id)
-    price = round(float(product["base_price"]) * float(product["rate"]) / 100, 2)
-    order = await db.create_order(message.from_user.id, product_id, product["title"], price, message.text.strip())
-    if not order:
-        await message.answer(await tr(message.from_user.id, "no_balance"))
-    elif isinstance(order, dict) and order.get("error") == "MIN":
-        await message.answer(f"❌ Minimum purchase amount: {float(order['minimum']):.2f} USDT")
-    else:
-        await message.answer(await tr(message.from_user.id, "processing"))
-        await notify_admin(
-            f"🆕 New Game ID order\n"
-            f"Order: #{order['id']}\nUser: <code>{message.from_user.id}</code> @{message.from_user.username or '-'}\n"
-            f"Product: {product['title']}\nPrice: {price:.2f} USDT\nGame ID: <code>{message.text.strip()}</code>\n\n"
-            f"Reply: /reply {message.from_user.id} MESSAGE"
-        )
-    await state.clear()
-
-@router.callback_query(F.data.startswith("pay:"))
-async def cb_pay(call: CallbackQuery, state: FSMContext):
-    method = call.data.split(":",1)[1]
-    pending_pay_method[call.from_user.id] = method
-    if method == "BYBIT":
-        await call.message.answer(f"💳 Bybit ID\n\nSend payment to Bybit ID:\n<code>{config.bybit_id}</code>\n\nAfter payment, send TXID or screenshot details to support.")
-        await call.answer(); return
-    label = "BEP20" if method == "BEP20" else "TRC20"
-    chain = "BEP20 / BSC" if method == "BEP20" else "TRC20 / TRON"
-    await call.message.answer(
-        f"💳 {label}\n\n📝 Enter the amount in USDT\nExample: 5\n\n"
-        f"✍️ Enter the USDT amount you want to reserve for {chain}.\n\n"
-        "⏱ This session will be reserved for 10 minutes.\n"
-        "❌ If you want to cancel the process, tap the Cancel button below.\n"
-        "⚠️ If the same amount is already reserved, please choose another amount or try again later."
-    )
-    await state.set_state(UserFlow.waiting_payment_amount)
-    await call.answer()
-
-@router.message(UserFlow.waiting_payment_amount)
-async def payment_amount(message: Message, state: FSMContext):
-    try:
-        amount = round(float(message.text.strip().replace(",", ".")), 2)
-        if amount <= 0: raise ValueError
-    except Exception:
-        await message.answer("❌ Please enter a valid amount, example: 5")
+            await cq.message.edit_text(text, reply_markup=reply_markup, **kwargs)
         return
-    method = pending_pay_method.get(message.from_user.id, "BEP20")
-    address = config.bep20_address if method == "BEP20" else config.trc20_address
-    expires = datetime.now(timezone.utc) + timedelta(minutes=10)
-    await db.create_payment(message.from_user.id, amount, method, address, expires)
-    chain = "BSC / BEP20" if method == "BEP20" else "TRC20 / TRON"
-    await message.answer(
-        f"💰 Kindly deposit exactly <b>{amount:.2f} USDT</b> ({chain}).\n\n"
-        f"📋 <b>Payment Address</b>\n<code>{address}</code>\n\n"
-        "☝️ Tap and hold the address to copy.\n\n"
-        f"⏰ This session will expire in 10 minutes ({expires.strftime('%d.%m.%Y %H:%M UTC')}).\n"
-        "⬇️ After payment, send the Transaction ID (TXID) here.\n\n"
-        "⚠️ Only payments made after this session was created will be accepted. Old TXIDs will not be accepted.\n"
-        f"⚠️ The TXID amount must be exactly {amount:.2f} USDT.",
-        reply_markup=kb.invoice_keyboard(method)
+    except Exception:
+        pass
+    try:
+        await cq.message.answer(text, reply_markup=reply_markup, **kwargs)
+    except Exception:
+        pass
+
+async def notify_admins(text):
+    for aid in ADMIN_IDS:
+        try:
+            await bot.send_message(aid, text)
+        except Exception:
+            pass
+
+async def send_welcome_message(m: Message):
+    photo_candidates = [
+        Path(WELCOME_PHOTO_PATH),
+        BASE_DIR / WELCOME_PHOTO_PATH,
+        BASE_DIR / "photo_2026-06-13_18-11-52.jpg",
+        BASE_DIR / "md_store_welcome.jpg",
+    ]
+    for photo_path in photo_candidates:
+        if photo_path.exists():
+            try:
+                await m.answer_photo(
+                    FSInputFile(photo_path),
+                    caption=txt(m.from_user.id, "welcome"),
+                    reply_markup=kb_main(m.from_user.id),
+                )
+                return
+            except Exception:
+                continue
+    await m.answer(txt(m.from_user.id, "welcome"), reply_markup=kb_main(m.from_user.id))
+
+@dp.message(CommandStart())
+async def start(m: Message):
+    referrer_id = 0
+    parts = (m.text or "").split(maxsplit=1)
+    if len(parts) > 1:
+        payload = parts[1].strip()
+        if payload.startswith("ref_") and payload[4:].isdigit():
+            referrer_id = int(payload[4:])
+    ensure(m.from_user, referrer_id)
+
+    for aid in ADMIN_IDS:
+        try:
+            await bot.send_message(
+                aid,
+                f"New User Started Bot\n\n"
+                f"ID: {m.from_user.id}\n"
+                f"Username: @{m.from_user.username}\n"
+                f"Name: {m.from_user.first_name}\n"
+                f"Referrer ID: {referrer_id or 'None'}"
+            )
+        except Exception:
+            pass
+
+    await send_welcome_message(m)
+
+@dp.message(Command("language"))
+async def cmd_language(m: Message):
+    ensure(m.from_user)
+    await m.answer(T["choose_lang"][lang(m.from_user.id)], reply_markup=kb_lang())
+
+
+@dp.message(Command("admin"))
+async def admin_panel(m: Message):
+    if not admin(m.from_user.id):
+        return await m.answer(T["admin_only"]["en"])
+    await m.answer(
+        "MD STORE Admin Panel\n\n"
+        "/addbalance USER_ID AMOUNT\n"
+        "/removebalance USER_ID AMOUNT\n"
+        "/setbalance USER_ID AMOUNT\n"
+        "/check USER_ID\n"
+        "/orders\n"
+        "/broadcast MESSAGE\n"
+        "/addcoupon CODE PERCENT\n"
+        "/delcoupon CODE\n"
+        "/coupons\n"
+        "/discount24"
     )
-    await state.set_state(UserFlow.waiting_txid)
 
-@router.message(UserFlow.waiting_txid)
-async def txid_received(message: Message, state: FSMContext):
-    await db.execute("""UPDATE payments SET txid=$2, status='WAITING_ADMIN' WHERE user_id=$1 AND status='PENDING'""", message.from_user.id, message.text.strip())
-    await message.answer("✅ TXID received. Your payment is being reviewed.")
-    await notify_admin(f"💳 New payment TXID\nUser: <code>{message.from_user.id}</code>\nTXID: <code>{message.text.strip()}</code>\nUse /addbalance USER_ID AMOUNT after confirmation.")
-    await state.clear()
+@dp.message(Command("addbalance"))
+async def cmd_addbalance(m: Message):
+    if not admin(m.from_user.id):
+        return await m.answer(T["admin_only"]["en"])
+    p = m.text.split()
+    if len(p) != 3:
+        return await m.answer("Usage: /addbalance USER_ID AMOUNT")
+    try:
+        uid = int(p[1])
+        amount = float(p[2])
+        add_balance(uid, amount)
+        await m.answer(f"Balance Added\n\nUser ID: {uid}\nAmount: {amount:.2f} USDT")
+        try:
+            await bot.send_message(uid, f"Your balance has been topped up by {amount:.2f} USDT.")
+        except Exception:
+            pass
+    except Exception:
+        await m.answer("Invalid input")
 
-@router.callback_query(F.data.startswith("copy:"))
-async def copy_addr(call: CallbackQuery):
-    method = call.data.split(":",1)[1]
-    address = config.bep20_address if method == "BEP20" else config.trc20_address
-    await call.message.answer(f"<code>{address}</code>")
-    await call.answer("Address sent as a copyable message.")
+@dp.message(Command("removebalance"))
+async def cmd_removebalance(m: Message):
+    if not admin(m.from_user.id):
+        return await m.answer(T["admin_only"]["en"])
+    p = m.text.split()
+    if len(p) != 3:
+        return await m.answer("Usage: /removebalance USER_ID AMOUNT")
+    try:
+        remove_balance(int(p[1]), float(p[2]))
+        await m.answer("Balance removed.")
+    except Exception:
+        await m.answer("Invalid input")
 
-@router.callback_query(F.data == "cancelpay")
-async def cancelpay(call: CallbackQuery, state: FSMContext):
-    await db.cancel_pending_payment(call.from_user.id)
-    await state.clear()
-    await call.message.answer("❌ Payment session cancelled.")
-    await call.answer()
+@dp.message(Command("setbalance"))
+async def cmd_setbalance(m: Message):
+    if not admin(m.from_user.id):
+        return await m.answer(T["admin_only"]["en"])
+    p = m.text.split()
+    if len(p) != 3:
+        return await m.answer("Usage: /setbalance USER_ID AMOUNT")
+    try:
+        uid = int(p[1])
+        amount = float(p[2])
+        add_balance(uid, 0)
+        set_balance(uid, amount)
+        await m.answer(f"Balance set.\nUser ID: {uid}\nBalance: {amount:.2f} USDT")
+    except Exception:
+        await m.answer("Invalid input")
 
-@router.callback_query(F.data == "txhistory")
-async def txhistory(call: CallbackQuery):
-    rows = await db.latest_payments(call.from_user.id)
+@dp.message(Command("check"))
+async def cmd_check(m: Message):
+    if not admin(m.from_user.id):
+        return await m.answer(T["admin_only"]["en"])
+    p = m.text.split()
+    if len(p) != 2 or not p[1].isdigit():
+        return await m.answer("Usage: /check USER_ID")
+    u = user(int(p[1]))
+    await m.answer(
+        "User not found." if not u else
+        f"User Info\n\nID: {u['user_id']}\nUsername: @{u['username']}\nBalance: {u['balance']:.2f} USDT\nLanguage: {u['lang']}\nCoupon: {u['active_coupon'] or '-'}"
+    )
+
+@dp.message(Command("orders"))
+async def cmd_orders_admin(m: Message):
+    if not admin(m.from_user.id):
+        return await m.answer(T["admin_only"]["en"])
+    with conn() as c:
+        rows = c.execute("SELECT * FROM orders ORDER BY id DESC LIMIT 25").fetchall()
     if not rows:
-        await call.message.answer("📊 📝 Transaction History\n\nNo transactions yet.")
-        await call.answer(); return
-    text = "📊 📝 <b>Transaction History</b>\n\n" + "\n\n".join(
-        f"{'✅' if r['status']=='CONFIRMED' else '❌' if 'CANCEL' in r['status'] else '⏳'} #{r['id']} | {float(r['amount']):.2f} $ | {r['method']}\n"
-        f"📅 {r['created_at'].strftime('%d.%m.%Y %H:%M')} | {r['status']}"
-        for r in rows
-    )
-    await call.message.answer(text)
-    await call.answer()
+        return await m.answer("No orders.")
+    text = "Last Orders\n\n"
+    for r in rows:
+        text += f"#{r['id']} | {r['user_id']} | {r['product']} | {r['price']:.2f} USDT | {r['status']}\n"
+    await m.answer(text)
 
-@router.callback_query(F.data.startswith("lang:"))
-async def set_lang(call: CallbackQuery):
-    lang = call.data.split(":",1)[1]
-    await db.execute("UPDATE users SET language=$2 WHERE id=$1", call.from_user.id, lang)
-    await call.message.answer(await tr(call.from_user.id, "lang_saved"), reply_markup=main_menu_lang(lang))
-    await call.answer()
-
-# Admin commands
-@router.message(Command("admin"))
-async def admin_panel(message: Message):
-    if not admin_only(message): return
-    await message.answer(ADMIN_HELP)
-
-@router.message(Command("addbalance"))
-async def cmd_addbalance(message: Message):
-    if not admin_only(message): return
-    try:
-        _, uid, amount = message.text.split(maxsplit=2)
-        await db.add_balance(int(uid), float(amount), "admin add")
-        await message.answer("✅ Balance added.")
-        await BOT.send_message(int(uid), f"✅ Your balance has been updated.\n+{float(amount):.2f} USDT")
-    except Exception:
-        await message.answer("Usage: /addbalance USER_ID AMOUNT")
-
-@router.message(Command("removebalance"))
-async def cmd_removebalance(message: Message):
-    if not admin_only(message): return
-    try:
-        _, uid, amount = message.text.split(maxsplit=2)
-        await db.add_balance(int(uid), -abs(float(amount)), "admin remove")
-        await message.answer("✅ Balance removed.")
-    except Exception:
-        await message.answer("Usage: /removebalance USER_ID AMOUNT")
-
-@router.message(Command("setbalance"))
-async def cmd_setbalance(message: Message):
-    if not admin_only(message): return
-    try:
-        _, uid, amount = message.text.split(maxsplit=2)
-        await db.set_balance(int(uid), float(amount))
-        await message.answer("✅ Balance set.")
-    except Exception:
-        await message.answer("Usage: /setbalance USER_ID AMOUNT")
-
-@router.message(Command("check"))
-async def cmd_check(message: Message):
-    if not admin_only(message): return
-    try:
-        uid = int(message.text.split()[1])
-        u = await db.get_user(uid)
-        await message.answer(str(dict(u)) if u else "User not found")
-    except Exception:
-        await message.answer("Usage: /check USER_ID")
-
-@router.message(Command("orders"))
-async def cmd_orders(message: Message):
-    if not admin_only(message): return
-    rows = await db.recent_orders()
-    await message.answer("📦 Orders\n\n" + "\n".join(f"#{r['id']} {r['user_id']} {r['title']} {float(r['price']):.2f} {r['status']}" for r in rows)[:3900])
-
-@router.message(Command("reply"))
-async def cmd_reply(message: Message):
-    if not admin_only(message): return
-    try:
-        _, uid, text = message.text.split(maxsplit=2)
-        await BOT.send_message(int(uid), text)
-        await message.answer("✅ Sent.")
-    except Exception:
-        await message.answer("Usage: /reply USER_ID MESSAGE")
-
-@router.message(Command("broadcast"))
-async def cmd_broadcast(message: Message):
-    if not admin_only(message): return
-    parts = message.text.split(maxsplit=1)
-    if len(parts) < 2:
-        await message.answer("Usage: /broadcast MESSAGE"); return
-    users = await db.all_users(); sent=0
+@dp.message(Command("broadcast"))
+async def cmd_broadcast(m: Message):
+    if not admin(m.from_user.id):
+        return await m.answer(T["admin_only"]["en"])
+    msg = m.text.replace("/broadcast", "", 1).strip()
+    if not msg:
+        return await m.answer("Usage: /broadcast MESSAGE")
+    with conn() as c:
+        users = c.execute("SELECT user_id FROM users").fetchall()
+    sent = 0
     for u in users:
         try:
-            await BOT.send_message(u["id"], parts[1]); sent += 1
-            await asyncio.sleep(0.03)
-        except Exception: pass
-    await message.answer(f"✅ Broadcast sent to {sent} users.")
+            await bot.send_message(u["user_id"], msg)
+            sent += 1
+        except Exception:
+            pass
+    await m.answer(f"Broadcast sent to {sent} users.")
 
-@router.message(Command("setmin"))
-async def cmd_setmin(message: Message):
-    if not admin_only(message): return
+@dp.message(Command("addcoupon"))
+async def cmd_addcoupon(m: Message):
+    if not admin(m.from_user.id):
+        return await m.answer(T["admin_only"]["en"])
+    p = m.text.split()
+    if len(p) != 3:
+        return await m.answer("Usage: /addcoupon CODE PERCENT")
     try:
-        _, uid, amount = message.text.split(maxsplit=2)
-        await db.execute("INSERT INTO users(id) VALUES($1) ON CONFLICT DO NOTHING", int(uid))
-        await db.execute("UPDATE users SET min_purchase=$2 WHERE id=$1", int(uid), float(amount))
-        await message.answer("✅ Minimum updated.")
-        await BOT.send_message(int(uid), f"✅ Your minimum purchase amount has been updated.\n\n💰 New Minimum Purchase:\n{float(amount):.2f} USDT")
+        code = p[1].upper()
+        percent = float(p[2])
+        with conn() as c:
+            c.execute(
+                "INSERT OR REPLACE INTO coupons(code, discount, active, created_at) VALUES(?,?,1,?)",
+                (code, percent, datetime.utcnow().isoformat())
+            )
+            c.commit()
+        await m.answer(f"Coupon saved.\nCode: {code}\nDiscount: {percent}%")
     except Exception:
-        await message.answer("Usage: /setmin USER_ID AMOUNT")
+        await m.answer("Invalid coupon data.")
 
-@router.message(Command("resetmin"))
-async def cmd_resetmin(message: Message):
-    if not admin_only(message): return
-    try:
-        uid = int(message.text.split()[1])
-        await db.execute("UPDATE users SET min_purchase=NULL WHERE id=$1", uid)
-        await BOT.send_message(uid, "✅ Your minimum purchase amount has been reset to the default value.")
-        await message.answer("✅ Reset.")
-    except Exception:
-        await message.answer("Usage: /resetmin USER_ID")
+@dp.message(Command("delcoupon"))
+async def cmd_delcoupon(m: Message):
+    if not admin(m.from_user.id):
+        return await m.answer(T["admin_only"]["en"])
+    p = m.text.split()
+    if len(p) != 2:
+        return await m.answer("Usage: /delcoupon CODE")
+    with conn() as c:
+        c.execute("UPDATE coupons SET active=0 WHERE code=?", (p[1].upper(),))
+        c.commit()
+    await m.answer("Coupon disabled.")
 
-@router.message(Command("setrate"))
-async def cmd_setrate(message: Message):
-    if not admin_only(message): return
-    try:
-        _, category, rate = message.text.split(maxsplit=2)
-        await db.set_category_rate(category, float(rate))
-        await message.answer(f"✅ Rate for {category} changed to {rate}%")
-    except Exception:
-        await message.answer("Usage: /setrate CATEGORY PERCENT")
+@dp.message(Command("coupons"))
+async def cmd_coupons(m: Message):
+    if not admin(m.from_user.id):
+        return await m.answer(T["admin_only"]["en"])
+    with conn() as c:
+        rows = c.execute("SELECT * FROM coupons ORDER BY created_at DESC LIMIT 30").fetchall()
+    if not rows:
+        return await m.answer("No coupons.")
+    await m.answer("\n".join([f"{r['code']} | {r['discount']}% | {'active' if r['active'] else 'off'}" for r in rows]))
 
-@router.message(Command("setgamerate"))
-async def cmd_setgamerate(message: Message):
-    if not admin_only(message): return
-    try:
-        rate = float(message.text.split()[1])
-        for cat in ["arena","baloot","zepeto","mobile_legends","league"]:
-            await db.set_category_rate(cat, rate)
-        await message.answer("✅ Game ID general rate updated. PUBG and Free Fire were not changed.")
-    except Exception:
-        await message.answer("Usage: /setgamerate PERCENT")
 
-@router.message(Command("setcoderate"))
-async def cmd_setcoderate(message: Message):
-    if not admin_only(message): return
-    try:
-        rate = float(message.text.split()[1])
-        await db.set_category_rate("pubg_voucher", rate)
-        await message.answer("✅ PUBG code rate updated.")
-    except Exception:
-        await message.answer("Usage: /setcoderate PERCENT")
+@dp.message(Command("discount24"))
+async def cmd_discount24(m: Message):
+    if not admin(m.from_user.id):
+        return await m.answer(T["admin_only"]["en"])
+    until = start_flash_discount(2.0, 24)
+    await m.answer(f"2% discount activated for 24 hours. Ends UTC: {until}")
 
-@router.message(Command("setprice"))
-async def cmd_setprice(message: Message):
-    if not admin_only(message): return
-    try:
-        _, _cat, pid, price = message.text.split(maxsplit=3)
-        await db.set_price(pid, float(price))
-        await message.answer("✅ Product price changed.")
-    except Exception:
-        await message.answer("Usage: /setprice CAT_KEY PRODUCT_ID PRICE")
+@dp.message(Command("coupon"))
+async def cmd_coupon(m: Message):
+    ensure(m.from_user)
+    p = m.text.split()
+    if len(p) != 2:
+        return await m.answer(txt(m.from_user.id, "coupon_help"))
+    code = p[1].upper()
+    with conn() as c:
+        row = c.execute("SELECT * FROM coupons WHERE code=? AND active=1", (code,)).fetchone()
+        if not row:
+            return await m.answer(txt(m.from_user.id, "coupon_bad"))
+        c.execute("UPDATE users SET active_coupon=? WHERE user_id=?", (code, m.from_user.id))
+        c.commit()
+    await m.answer(txt(m.from_user.id, "coupon_ok"))
 
-@router.message(Command("addproduct"))
-async def cmd_addproduct(message: Message):
-    if not admin_only(message): return
-    try:
-        # /addproduct id|category|title|base_price|rate|ask_game_id(0/1)
-        data = message.text.split(maxsplit=1)[1]
-        pid, cat, title, base, rate, ask = [x.strip() for x in data.split("|")]
-        await db.add_product(pid, cat, title, float(base), float(rate), ask == "1")
-        await message.answer("✅ Product added/updated.")
-    except Exception:
-        await message.answer("Usage: /addproduct id|category|title|base_price|rate|ask_game_id(0/1)")
+@dp.callback_query(F.data.startswith("lang:"))
+async def cb_lang(cq: CallbackQuery):
+    ensure(cq.from_user)
+    set_lang(cq.from_user.id, cq.data.split(":")[1])
+    await safe_edit(cq, txt(cq.from_user.id, "welcome"), reply_markup=kb_main(cq.from_user.id))
+    await cq.answer()
 
-@router.message(Command("delproduct"))
-async def cmd_delproduct(message: Message):
-    if not admin_only(message): return
-    try:
-        pid = message.text.split()[1]
-        await db.del_product(pid)
-        await message.answer("✅ Product disabled/deleted.")
-    except Exception:
-        await message.answer("Usage: /delproduct PRODUCT_ID")
+@dp.callback_query(F.data == "choose_lang")
+async def cb_choose_lang(cq: CallbackQuery):
+    await safe_edit(cq, T["choose_lang"][lang(cq.from_user.id)], reply_markup=kb_lang())
+    await cq.answer()
 
-@router.message(Command("prices"))
-async def cmd_prices(message: Message):
-    if not admin_only(message): return
-    rows = await db.fetch("SELECT id,category,title,base_price,rate FROM products WHERE enabled=true ORDER BY category,id")
-    text = "Prices\n" + "\n".join(f"{r['category']} | {r['id']} | {r['title']} | {round(float(r['base_price'])*float(r['rate'])/100,2):.2f}" for r in rows)
-    await send_text_file(message, "prices.txt", text)
+@dp.callback_query(F.data == "main")
+async def cb_main(cq: CallbackQuery):
+    await safe_edit(cq, txt(cq.from_user.id, "welcome"), reply_markup=kb_main(cq.from_user.id))
+    await cq.answer()
 
-@router.message(Command("payments"))
-async def cmd_payments(message: Message):
-    if not admin_only(message): return
-    rows = await db.fetch("SELECT * FROM payments ORDER BY id DESC LIMIT 50")
-    await message.answer("Payments\n" + "\n".join(f"#{r['id']} {r['user_id']} {r['amount']} {r['method']} {r['status']}" for r in rows)[:3900])
+@dp.callback_query(F.data == "shop")
+async def cb_shop(cq: CallbackQuery):
+    await safe_edit(cq, txt(cq.from_user.id, "category_text"), reply_markup=kb_cats(cq.from_user.id))
+    await cq.answer()
 
-@router.message(Command("ban"))
-async def cmd_ban(message: Message):
-    if not admin_only(message): return
-    try:
-        uid=int(message.text.split()[1]); await db.execute("UPDATE users SET is_banned=true WHERE id=$1", uid); await message.answer("✅ Banned")
-    except Exception: await message.answer("Usage: /ban USER_ID")
+@dp.callback_query(F.data == "topup")
+async def cb_topup(cq: CallbackQuery):
+    text = txt(cq.from_user.id, "pay", wallet=USDT_BEP20_ADDRESS, bybit=BYBIT_ID, support=SUPPORT_USERNAME)
+    await safe_edit(cq, text, reply_markup=payment_keyboard(cq.from_user.id))
+    await cq.answer()
 
-@router.message(Command("unban"))
-async def cmd_unban(message: Message):
-    if not admin_only(message): return
-    try:
-        uid=int(message.text.split()[1]); await db.execute("UPDATE users SET is_banned=false WHERE id=$1", uid); await message.answer("✅ Unbanned")
-    except Exception: await message.answer("Usage: /unban USER_ID")
+@dp.callback_query(F.data == "paid")
+async def cb_paid(cq: CallbackQuery):
+    ensure(cq.from_user)
+    with conn() as c:
+        cur = c.execute(
+            "INSERT INTO payment_requests(user_id, username, status, created_at) VALUES(?,?,?,?)",
+            (cq.from_user.id, cq.from_user.username or "", "pending", datetime.utcnow().isoformat())
+        )
+        pid = cur.lastrowid
+        c.commit()
+    await notify_admins(
+        f"Payment Notice #{pid}\n\nUser ID: {cq.from_user.id}\nUsername: @{cq.from_user.username}\nStatus: Pending\n\nAsk the user for screenshot/hash if needed."
+    )
+    await safe_edit(cq, txt(cq.from_user.id, "paid_sent"), reply_markup=main_back_keyboard(cq.from_user.id))
+    await cq.answer()
 
-@router.message(Command("addcoupon","delcoupon","coupons","discount24","discountall"))
-async def coupons_and_discounts(message: Message):
-    if not admin_only(message): return
-    cmd = message.text.split()[0]
-    try:
-        if cmd == "/addcoupon":
-            _, code, pct = message.text.split(maxsplit=2)
-            await db.execute("INSERT INTO coupons(code, percent) VALUES($1,$2) ON CONFLICT(code) DO UPDATE SET percent=$2", code.upper(), float(pct))
-            await message.answer("✅ Coupon saved.")
-        elif cmd == "/delcoupon":
-            await db.execute("DELETE FROM coupons WHERE code=$1", message.text.split()[1].upper()); await message.answer("✅ Deleted.")
-        elif cmd == "/coupons":
-            rows = await db.fetch("SELECT * FROM coupons ORDER BY created_at DESC")
-            await message.answer("Coupons\n" + "\n".join(f"{r['code']} {r['percent']}%" for r in rows) or "No coupons")
-        elif cmd == "/discountall":
-            pct = float(message.text.split()[1])
-            await db.execute("UPDATE products SET rate=$1", pct)
-            await message.answer("✅ All product rates changed.")
+
+@dp.callback_query(F.data == "copy_usdt")
+async def cb_copy_usdt(cq: CallbackQuery):
+    # Telegram bots cannot copy text directly to the user's clipboard.
+    # This sends the wallet address alone in a separate message so the user can copy it easily.
+    await cq.answer("USDT address sent below")
+    await cq.message.answer(
+        f"USDT BEP20 Address:\n\n`{USDT_BEP20_ADDRESS}`\n\nTap and hold the address to copy it.",
+        parse_mode="Markdown"
+    )
+
+@dp.callback_query(F.data == "faq")
+async def cb_faq(cq: CallbackQuery):
+    l = lang(cq.from_user.id)
+    if l == "ar":
+        text = (
+            "الأسئلة الشائعة\n\n"
+            "من نحن؟\n"
+            "نحن MD STORE متجر متخصص في بيع البطاقات الرقمية وشحن الألعاب للتجار والعملاء مع دعم سريع وأسعار مناسبة.\n\n"
+            "كيف أثق؟\n"
+            f"يمكنك التواصل معنا للحصول على مراجعات وتجارب العملاء عبر {SUPPORT_USERNAME}.\n\n"
+            "كيف يعمل البوت؟\n"
+            "تختار المنتج ثم تشحن محفظتك داخل البوت وتؤكد الطلب وبعدها يتم تجهيز وتسليم الكود.\n\n"
+            "هل الأكواد فورية؟\n"
+            "نعم، الأكواد تسليم فوري وصالحة للتخزين سنة كاملة."
+        )
+    elif l == "ru":
+        text = (
+            "FAQ\n\n"
+            "Кто мы?\n"
+            "MD STORE — магазин цифровых карт и игровых пополнений для клиентов и реселлеров.\n\n"
+            "Как доверять?\n"
+            f"Свяжитесь с нами для отзывов клиентов: {SUPPORT_USERNAME}.\n\n"
+            "Как работает бот?\n"
+            "Вы выбираете товар, пополняете баланс в боте, подтверждаете заказ, затем получаете код.\n\n"
+            "Коды быстрые?\n"
+            "Да, доставка мгновенная, коды можно хранить целый год."
+        )
+    else:
+        text = (
+            "FAQ\n\n"
+            "Who are we?\n"
+            "We are MD STORE, a digital gift card and game top-up store for customers and resellers with fast support and good prices.\n\n"
+            "How can I trust?\n"
+            f"Contact us for customer reviews and proof: {SUPPORT_USERNAME}.\n\n"
+            "How does the bot work?\n"
+            "Choose a product, top up your wallet in the bot, confirm your order, then receive your code.\n\n"
+            "Are codes instant?\n"
+            "Yes, codes are delivered instantly and are valid for storage for a full year."
+        )
+    await safe_edit(cq, text, reply_markup=main_back_keyboard(cq.from_user.id))
+    await cq.answer()
+
+@dp.callback_query(F.data == "referrals")
+async def cb_referrals(cq: CallbackQuery):
+    ensure(cq.from_user)
+    invited, earnings = referral_stats(cq.from_user.id)
+    bot_username = (await bot.get_me()).username
+    link = f"https://t.me/{bot_username}?start=ref_{cq.from_user.id}"
+    text = (
+        f"Referral System\n\n"
+        f"Your referral link:\n{link}\n\n"
+        f"Invited users: {invited}\n"
+        f"Referral earnings: {earnings:.2f} USDT\n\n"
+        f"Share your link. When your invited users buy, you receive referral balance."
+    )
+    await safe_edit(cq, text, reply_markup=main_back_keyboard(cq.from_user.id))
+    await cq.answer()
+
+@dp.callback_query(F.data == "balance")
+async def cb_balance(cq: CallbackQuery):
+    u = user(cq.from_user.id)
+    b = float(u["balance"]) if u else 0.0
+    code, discount = get_discount(cq.from_user.id)
+    text = txt(cq.from_user.id, "wallet", balance=b)
+    if code:
+        text += f"\nCoupon: {code} ({discount:.0f}%)"
+    text += "\n\n" + txt(cq.from_user.id, "coupon_help")
+    await safe_edit(cq, text, reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text=T["topup"][lang(cq.from_user.id)], callback_data="topup")],
+        [InlineKeyboardButton(text=T["back"][lang(cq.from_user.id)], callback_data="main")]
+    ]))
+    await cq.answer()
+
+@dp.callback_query(F.data == "support")
+async def cb_support(cq: CallbackQuery):
+    text = txt(cq.from_user.id, "pay", wallet=USDT_BEP20_ADDRESS, bybit=BYBIT_ID, support=SUPPORT_USERNAME)
+    await safe_edit(cq, text, reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text=SUPPORT_USERNAME, url=f"https://t.me/{SUPPORT_USERNAME.replace('@','')}")],
+        [InlineKeyboardButton(text=T["channel"][lang(cq.from_user.id)], url=CHANNEL_URL)],
+        [InlineKeyboardButton(text=T["back"][lang(cq.from_user.id)], callback_data="main")]
+    ]))
+    await cq.answer()
+
+@dp.callback_query(F.data == "orders")
+async def cb_orders(cq: CallbackQuery):
+    with conn() as c:
+        rows = c.execute("SELECT * FROM orders WHERE user_id=? ORDER BY id DESC LIMIT 10", (cq.from_user.id,)).fetchall()
+    if not rows:
+        text = txt(cq.from_user.id, "no_orders")
+    else:
+        text = "My Orders\n\n"
+        for r in rows:
+            text += f"#{r['id']} | {r['product']}\nAmount: {r['price']:.2f} USDT\nStatus: {r['status']}\n\n"
+    await safe_edit(cq, text, reply_markup=main_back_keyboard(cq.from_user.id))
+    await cq.answer()
+
+@dp.callback_query(F.data == "latest")
+async def cb_latest(cq: CallbackQuery):
+    with conn() as c:
+        rows = c.execute("SELECT * FROM orders ORDER BY id DESC LIMIT 10").fetchall()
+    if not rows:
+        text = txt(cq.from_user.id, "no_latest")
+    else:
+        text = "Latest Purchases\n\n"
+        for r in rows:
+            text += f"Someone purchased {r['product']}\nAmount: {r['price']:.2f} USDT\nStatus: {r['status']}\n\n"
+    await safe_edit(cq, text, reply_markup=main_back_keyboard(cq.from_user.id))
+    await cq.answer()
+
+@dp.callback_query(F.data == "profile")
+async def cb_profile(cq: CallbackQuery):
+    u = user(cq.from_user.id)
+    invited, earnings = referral_stats(cq.from_user.id)
+    b = float(u["balance"]) if u else 0.0
+    text = (
+        "Profile\n\n"
+        f"ID: {cq.from_user.id}\n"
+        f"Username: @{cq.from_user.username}\n"
+        f"Balance: {b:.2f} USDT\n"
+        f"Invited users: {invited}\n"
+        f"Referral earnings: {earnings:.2f} USDT"
+    )
+    await safe_edit(cq, text, reply_markup=main_back_keyboard(cq.from_user.id))
+    await cq.answer()
+
+@dp.callback_query(F.data == "special_offers")
+async def cb_special_offers(cq: CallbackQuery):
+    text = (
+        "Special Offers\n\n"
+        "HOT DEAL: Razer Gold and PUBG UC are available with trader prices.\n"
+        "Coupon: WELCOME5\n"
+        "For every 200 USDT deposit, contact support to receive a 5 USDT discount."
+    )
+    await safe_edit(cq, text, reply_markup=main_back_keyboard(cq.from_user.id))
+    await cq.answer()
+
+@dp.callback_query(F.data == "best_sellers")
+async def cb_best_sellers(cq: CallbackQuery):
+    text = (
+        "Best Sellers\n\n"
+        "Razer Gold\n"
+        "PUBG UC\n"
+        "Steam USA\n"
+        "PlayStation USA\n"
+        "iTunes USA\n"
+        "Roblox Gift Cards"
+    )
+    await safe_edit(cq, text, reply_markup=main_back_keyboard(cq.from_user.id))
+    await cq.answer()
+
+@dp.callback_query(F.data == "reviews")
+async def cb_reviews(cq: CallbackQuery):
+    text = (
+        "Customer Reviews\n\n"
+        "Open the MD STORE Web App to view customer reviews, ratings, and proof of recent deals."
+    )
+    await safe_edit(cq, text, reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="Open Reviews", web_app=WebAppInfo(url=web_reviews_url()))],
+        [InlineKeyboardButton(text=T["back"][lang(cq.from_user.id)], callback_data="main")]
+    ]))
+    await cq.answer()
+
+@dp.callback_query(F.data == "coupons")
+async def cb_coupons(cq: CallbackQuery):
+    text = (
+        "Coupons\n\n"
+        "WELCOME5\n"
+        "Every 200 USDT deposit can receive a 5 USDT discount.\n\n"
+        "To apply a coupon, send:\n/coupon CODE"
+    )
+    await safe_edit(cq, text, reply_markup=main_back_keyboard(cq.from_user.id))
+    await cq.answer()
+
+@dp.callback_query(F.data == "wholesale")
+async def cb_wholesale(cq: CallbackQuery):
+    text = (
+        "Wholesale Prices\n\n"
+        "MD STORE supplies digital cards and game top-ups for traders and resellers.\n"
+        "For large quantities and long-term cooperation, contact support.\n\n"
+        f"Minimum order: {get_min_order(cq.from_user.id):.0f} USDT"
+    )
+    await safe_edit(cq, text, reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text=SUPPORT_USERNAME, url=f"https://t.me/{SUPPORT_USERNAME.replace('@','')}")],
+        [InlineKeyboardButton(text=T["back"][lang(cq.from_user.id)], callback_data="main")]
+    ]))
+    await cq.answer()
+
+@dp.callback_query(F.data.startswith("cat:"))
+async def cb_cat(cq: CallbackQuery):
+    cat_key = cq.data.split(":")[1]
+    await safe_edit(cq, cat_name(cat_key, lang(cq.from_user.id)), reply_markup=kb_items(cq.from_user.id, cat_key))
+    await cq.answer()
+
+@dp.callback_query(F.data.startswith("view:"))
+async def cb_view(cq: CallbackQuery):
+    _, cat_key, pid = cq.data.split(":")
+    item = get_item(cat_key, pid)
+    if not item:
+        return await cq.answer("Product not found", show_alert=True)
+    l = lang(cq.from_user.id)
+    text = f"{product_name(cat_key, item, l)}\n\nPrice: {price_text(item['price'])}\nValidity: 1 Year\nDelivery: Instant"
+    await safe_edit(cq, text, reply_markup=kb_product_actions(cq.from_user.id, cat_key, pid))
+    await cq.answer()
+
+@dp.callback_query(F.data.startswith("addcart:"))
+async def cb_addcart(cq: CallbackQuery):
+    _, cat_key, pid = cq.data.split(":")
+    item = get_item(cat_key, pid)
+    if not item:
+        return await cq.answer("Product not found", show_alert=True)
+    with conn() as c:
+        c.execute(
+            "INSERT INTO cart(user_id, cat_key, product_id, quantity, created_at) VALUES(?,?,?,?,?)",
+            (cq.from_user.id, cat_key, pid, 1, datetime.utcnow().isoformat())
+        )
+        c.commit()
+    await cq.answer(txt(cq.from_user.id, "added_cart"), show_alert=True)
+
+@dp.callback_query(F.data.startswith("addfav:"))
+async def cb_addfav(cq: CallbackQuery):
+    _, cat_key, pid = cq.data.split(":")
+    item = get_item(cat_key, pid)
+    if not item:
+        return await cq.answer("Product not found", show_alert=True)
+    with conn() as c:
+        c.execute(
+            "INSERT OR IGNORE INTO favorites(user_id, cat_key, product_id, created_at) VALUES(?,?,?,?)",
+            (cq.from_user.id, cat_key, pid, datetime.utcnow().isoformat())
+        )
+        c.commit()
+    await cq.answer(txt(cq.from_user.id, "added_fav"), show_alert=True)
+
+@dp.callback_query(F.data == "favorites")
+async def cb_favorites(cq: CallbackQuery):
+    l = lang(cq.from_user.id)
+    with conn() as c:
+        rows = c.execute("SELECT * FROM favorites WHERE user_id=? ORDER BY created_at DESC", (cq.from_user.id,)).fetchall()
+    if not rows:
+        return await safe_edit(cq, txt(cq.from_user.id, "empty_fav"), reply_markup=main_back_keyboard(cq.from_user.id))
+    buttons = []
+    for r in rows:
+        item = get_item(r["cat_key"], r["product_id"])
+        if item:
+            buttons.append([InlineKeyboardButton(text=product_name(r["cat_key"], item, l), callback_data=f"view:{r['cat_key']}:{r['product_id']}")])
+    buttons.append([InlineKeyboardButton(text=T["back"][l], callback_data="main")])
+    await safe_edit(cq, T["favorites"][l], reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons))
+    await cq.answer()
+
+@dp.callback_query(F.data == "cart")
+async def cb_cart(cq: CallbackQuery):
+    l = lang(cq.from_user.id)
+    with conn() as c:
+        rows = c.execute("SELECT * FROM cart WHERE user_id=? ORDER BY id DESC", (cq.from_user.id,)).fetchall()
+    if not rows:
+        return await safe_edit(cq, txt(cq.from_user.id, "empty_cart"), reply_markup=main_back_keyboard(cq.from_user.id))
+    total = 0.0
+    text = "Cart\n\n"
+    for r in rows:
+        item = get_item(r["cat_key"], r["product_id"])
+        if not item:
+            continue
+        price = float(item["price"] or 0.0)
+        total += price
+        text += f"{product_name(r['cat_key'], item, l)} — {price_text(item['price'])}\n"
+    final, code, percent = apply_discount(cq.from_user.id, total)
+    text += f"\nSubtotal: {total:.2f} USDT"
+    if code:
+        text += f"\nCoupon: {code} - {percent:.0f}%\nTotal: {final:.2f} USDT"
+    text += "\n\n" + txt(cq.from_user.id, "coupon_help")
+    await safe_edit(cq, text, reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text=T["checkout"][l], callback_data="checkout")],
+        [InlineKeyboardButton(text=T["clear_cart"][l], callback_data="clearcart")],
+        [InlineKeyboardButton(text=T["back"][l], callback_data="main")]
+    ]))
+    await cq.answer()
+
+@dp.callback_query(F.data == "clearcart")
+async def cb_clearcart(cq: CallbackQuery):
+    with conn() as c:
+        c.execute("DELETE FROM cart WHERE user_id=?", (cq.from_user.id,))
+        c.commit()
+    await safe_edit(cq, txt(cq.from_user.id, "empty_cart"), reply_markup=main_back_keyboard(cq.from_user.id))
+    await cq.answer()
+
+async def create_order(cq: CallbackQuery, product: str, price: float, gift_to: str = ""):
+    with conn() as c:
+        if price > 0:
+            c.execute("UPDATE users SET balance=balance-? WHERE user_id=?", (price, cq.from_user.id))
+        cur = c.execute(
+            "INSERT INTO orders(user_id, username, product, price, status, gift_to, created_at) VALUES(?,?,?,?,?,?,?)",
+            (cq.from_user.id, cq.from_user.username or "", product, price, "pending", gift_to, datetime.utcnow().isoformat())
+        )
+        oid = cur.lastrowid
+        c.commit()
+    add_referral_commission(cq.from_user.id, price)
+    gift_line = f"\nGift To: {gift_to}" if gift_to else ""
+    await notify_admins(
+        f"New Order #{oid}\n\nUser ID: {cq.from_user.id}\nUsername: @{cq.from_user.username}\nProduct: {product}\nAmount: {price:.2f} USDT{gift_line}"
+    )
+    return oid
+
+@dp.callback_query(F.data == "checkout")
+async def cb_checkout(cq: CallbackQuery):
+    u = user(cq.from_user.id)
+    balance = float(u["balance"]) if u else 0.0
+    l = lang(cq.from_user.id)
+
+    if balance <= 0:
+        return await safe_edit(cq, txt(cq.from_user.id, "need_balance"), reply_markup=main_back_keyboard(cq.from_user.id))
+    if balance < get_min_order(cq.from_user.id):
+        return await safe_edit(cq, txt(cq.from_user.id, "min_order", min_order=get_min_order(cq.from_user.id)), reply_markup=main_back_keyboard(cq.from_user.id))
+
+    with conn() as c:
+        rows = c.execute("SELECT * FROM cart WHERE user_id=? ORDER BY id", (cq.from_user.id,)).fetchall()
+
+    if not rows:
+        return await safe_edit(cq, txt(cq.from_user.id, "empty_cart"), reply_markup=main_back_keyboard(cq.from_user.id))
+
+    total = 0.0
+    names = []
+    for r in rows:
+        item = get_item(r["cat_key"], r["product_id"])
+        if item:
+            total += float(item["price"] or 0.0)
+            names.append(product_name(r["cat_key"], item, l))
+    final, code, percent = apply_discount(cq.from_user.id, total)
+
+    if balance < final:
+        return await safe_edit(cq, txt(cq.from_user.id, "need_balance"), reply_markup=main_back_keyboard(cq.from_user.id))
+
+    await create_order(cq, "Cart: " + ", ".join(names), final)
+    with conn() as c:
+        c.execute("DELETE FROM cart WHERE user_id=?", (cq.from_user.id,))
+        c.commit()
+
+    await safe_edit(cq, txt(cq.from_user.id, "order_done"), reply_markup=main_back_keyboard(cq.from_user.id))
+    await cq.answer()
+
+@dp.callback_query(F.data.startswith("buy:"))
+async def cb_buy(cq: CallbackQuery):
+    _, cat_key, pid = cq.data.split(":")
+    item = get_item(cat_key, pid)
+    if not item:
+        return await cq.answer("Product not found", show_alert=True)
+
+    u = user(cq.from_user.id)
+    b = float(u["balance"]) if u else 0.0
+    l = lang(cq.from_user.id)
+
+    if b <= 0:
+        return await safe_edit(cq, txt(cq.from_user.id, "need_balance"), reply_markup=main_back_keyboard(cq.from_user.id))
+    if b < get_min_order(cq.from_user.id):
+        return await safe_edit(cq, txt(cq.from_user.id, "min_order", min_order=get_min_order(cq.from_user.id)), reply_markup=main_back_keyboard(cq.from_user.id))
+
+    price_val = float(item["price"] or 0.0)
+    final, code, percent = apply_discount(cq.from_user.id, price_val)
+
+    if b < final:
+        return await safe_edit(cq, txt(cq.from_user.id, "need_balance"), reply_markup=main_back_keyboard(cq.from_user.id))
+
+    pname = product_name(cat_key, item, l)
+    price_line = f"{final:.2f} USDT"
+    if code:
+        price_line += f"\nCoupon: {code} - {percent:.0f}%"
+
+    text = f"{T['confirm'][l]}\n\nProduct: {pname}\nPrice: {price_line}\nBalance: {b:.2f} USDT"
+    await safe_edit(cq, text, reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text=T["confirm"][l], callback_data=f"confirm:{cat_key}:{pid}")],
+        [InlineKeyboardButton(text=T["back"][l], callback_data=f"view:{cat_key}:{pid}")]
+    ]))
+    await cq.answer()
+
+@dp.callback_query(F.data.startswith("gift:"))
+async def cb_gift(cq: CallbackQuery):
+    _, cat_key, pid = cq.data.split(":")
+    item = get_item(cat_key, pid)
+    if not item:
+        return await cq.answer("Product not found", show_alert=True)
+    l = lang(cq.from_user.id)
+    pname = product_name(cat_key, item, l)
+    await safe_edit(cq, 
+        f"{T['gift'][l]}\n\n{pname}\n\nTo send this as a gift, confirm the purchase then send the recipient details to support.",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text=T["confirm"][l], callback_data=f"confirmgift:{cat_key}:{pid}")],
+            [InlineKeyboardButton(text=T["back"][l], callback_data=f"view:{cat_key}:{pid}")]
+        ])
+    )
+    await cq.answer()
+
+@dp.callback_query(F.data.startswith("confirmgift:"))
+async def cb_confirm_gift(cq: CallbackQuery):
+    _, cat_key, pid = cq.data.split(":")
+    item = get_item(cat_key, pid)
+    if not item:
+        return await cq.answer("Product not found", show_alert=True)
+    u = user(cq.from_user.id)
+    b = float(u["balance"]) if u else 0.0
+    if b <= 0:
+        return await safe_edit(cq, txt(cq.from_user.id, "need_balance"), reply_markup=main_back_keyboard(cq.from_user.id))
+    if b < get_min_order(cq.from_user.id):
+        return await safe_edit(cq, txt(cq.from_user.id, "min_order", min_order=get_min_order(cq.from_user.id)), reply_markup=main_back_keyboard(cq.from_user.id))
+    price_val = float(item["price"] or 0.0)
+    final, code, percent = apply_discount(cq.from_user.id, price_val)
+    if b < final:
+        return await safe_edit(cq, txt(cq.from_user.id, "need_balance"), reply_markup=main_back_keyboard(cq.from_user.id))
+    pname = product_name(cat_key, item, lang(cq.from_user.id))
+    await create_order(cq, pname, final, gift_to="Recipient details will be sent to support")
+    await safe_edit(cq, txt(cq.from_user.id, "order_done"), reply_markup=main_back_keyboard(cq.from_user.id))
+    await cq.answer()
+
+@dp.callback_query(F.data.startswith("confirm:"))
+async def cb_confirm(cq: CallbackQuery):
+    _, cat_key, pid = cq.data.split(":")
+    item = get_item(cat_key, pid)
+    if not item:
+        return await cq.answer("Product not found", show_alert=True)
+
+    u = user(cq.from_user.id)
+    b = float(u["balance"]) if u else 0.0
+
+    if b <= 0:
+        return await safe_edit(cq, txt(cq.from_user.id, "need_balance"), reply_markup=main_back_keyboard(cq.from_user.id))
+    if b < get_min_order(cq.from_user.id):
+        return await cq.answer(f"Minimum order is {get_min_order(cq.from_user.id):.0f} USDT", show_alert=True)
+
+    price_val = float(item["price"] or 0.0)
+    final, code, percent = apply_discount(cq.from_user.id, price_val)
+
+    if b < final:
+        return await cq.answer("Not enough balance", show_alert=True)
+
+    pname = product_name(cat_key, item, lang(cq.from_user.id))
+    await create_order(cq, pname, final)
+    await safe_edit(cq, txt(cq.from_user.id, "order_done"), reply_markup=main_back_keyboard(cq.from_user.id))
+    await cq.answer()
+
+@dp.message()
+async def forward_user_messages_to_admin(m: Message):
+    ensure(m.from_user)
+    if admin(m.from_user.id):
+        return
+    content = m.text or m.caption or ""
+    if not content:
+        if m.photo:
+            content = "[Photo]"
+        elif m.document:
+            content = f"[Document] {m.document.file_name or ''}"
+        elif m.sticker:
+            content = "[Sticker]"
+        elif m.video:
+            content = "[Video]"
+        elif m.voice:
+            content = "[Voice]"
         else:
-            await message.answer("/discount24 saved as placeholder. Use /setrate or /discountall for active changes.")
-    except Exception:
-        await message.answer("Coupon/discount command format error.")
-
-async def export_csv(message: Message, filename: str, rows):
-    output = io.StringIO()
-    if rows:
-        writer = csv.DictWriter(output, fieldnames=list(dict(rows[0]).keys()))
-        writer.writeheader()
-        for r in rows: writer.writerow({k: str(v) for k, v in dict(r).items()})
-    path = Path(filename); path.write_text(output.getvalue(), encoding="utf-8")
-    await message.answer_document(FSInputFile(path)); path.unlink(missing_ok=True)
-
-async def send_text_file(message: Message, filename: str, text: str):
-    path = Path(filename); path.write_text(text, encoding="utf-8")
-    await message.answer_document(FSInputFile(path)); path.unlink(missing_ok=True)
-
-@router.message(Command("exportusers"))
-async def export_users(message: Message):
-    if admin_only(message): await export_csv(message, "users.csv", await db.all_users())
-
-@router.message(Command("exportorders"))
-async def export_orders(message: Message):
-    if admin_only(message): await export_csv(message, "orders.csv", await db.all_orders())
-
-@router.message(Command("exportbalances"))
-async def export_balances(message: Message):
-    if admin_only(message): await export_csv(message, "balances.csv", await db.balances())
-
-@router.message(Command("backup"))
-async def backup(message: Message):
-    if not admin_only(message): return
-    data = await db.backup_json()
-    path = Path("backup_prime_topup.json")
-    path.write_text(json.dumps(data, default=str, ensure_ascii=False, indent=2), encoding="utf-8")
-    await message.answer_document(FSInputFile(path)); path.unlink(missing_ok=True)
-
-@router.message(Command("restore"))
-async def restore(message: Message):
-    if not admin_only(message): return
-    await message.answer("/restore is protected. Uploading and restoring JSON should be done manually after checking the backup file to avoid data loss.")
-
-@router.message()
-async def any_message(message: Message):
-    if not await user_guard(message): return
-    if message.from_user.id != config.admin_id:
-        await notify_admin(f"💬 User message\nFrom: <code>{message.from_user.id}</code> @{message.from_user.username or '-'}\n\n{message.text or '[non-text message]'}")
-    lang = await get_lang(message.from_user.id)
-    await message.answer(await tr(message.from_user.id, "generic"), reply_markup=main_menu_lang(lang))
-
-ADMIN_HELP = """<b>MD STORE Admin Panel</b>
-
-/addbalance USER_ID AMOUNT
-/removebalance USER_ID AMOUNT
-/setbalance USER_ID AMOUNT
-/check USER_ID
-/orders
-/broadcast MESSAGE
-/addcoupon CODE PERCENT
-/delcoupon CODE
-/coupons
-/ban USER_ID
-/unban USER_ID
-/setmin USER_ID AMOUNT
-/resetmin USER_ID
-/discount24
-/prices
-/setprice CAT_KEY PRODUCT_ID PRICE
-/discountall PERCENT
-/payments
-/reply USER_ID MESSAGE
-/addproduct id|category|title|base_price|rate|ask_game_id(0/1)
-/delproduct PRODUCT_ID
-/setrate CATEGORY PERCENT
-/setgamerate PERCENT
-/setcoderate PERCENT
-/backup
-/restore
-/exportusers
-/exportorders
-/exportbalances
-"""
+            content = "[Non-text message]"
+    await notify_admins(
+        f"User Message\n\n"
+        f"ID: {m.from_user.id}\n"
+        f"Username: @{m.from_user.username}\n"
+        f"Name: {m.from_user.first_name}\n\n"
+        f"Message:\n{content}"
+    )
 
 async def main():
-    global BOT
-    if not config.bot_token:
-        raise RuntimeError("BOT_TOKEN is required")
-    await db.init_db()
-    BOT = Bot(config.bot_token, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
-    dp = Dispatcher()
-    dp.include_router(router)
-    await BOT.delete_webhook(drop_pending_updates=True)
-    await dp.start_polling(BOT)
+    init_db()
+    print(f"{BOT_NAME} started")
+    await dp.start_polling(bot)
 
 if __name__ == "__main__":
     asyncio.run(main())
