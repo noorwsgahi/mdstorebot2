@@ -338,57 +338,6 @@ async def notify_admin(text: str, reply_markup=None):
         except Exception as e:
             logging.warning("admin notify failed: %s", e)
 
-
-# ---------------- Old bot closed redirect ----------------
-CLOSED_BOT_MESSAGE = (
-    "تم قفل البوت ونقل البوت، البوت الجديد هنا: @TopupPrimeBot\n\n"
-    "The bot has been closed and moved. The new bot is here: @TopupPrimeBot"
-)
-
-def is_regular_user_message(message: Message) -> bool:
-    return bool(message.from_user) and not admin_only(message)
-
-def is_regular_user_callback(call: CallbackQuery) -> bool:
-    return bool(call.from_user) and call.from_user.id != config.admin_id
-
-async def closed_redirect_keyboard(user_id: int):
-    try:
-        lang = await user_lang(user_id)
-    except Exception:
-        lang = "en"
-    try:
-        return main_menu_lang(lang)
-    except Exception:
-        return None
-
-@router.message(CommandStart(), is_regular_user_message)
-async def closed_start_redirect(message: Message, state: FSMContext):
-    await state.clear()
-    await message.answer(
-        CLOSED_BOT_MESSAGE,
-        reply_markup=await closed_redirect_keyboard(message.from_user.id)
-    )
-
-@router.callback_query(is_regular_user_callback)
-async def closed_callback_redirect(call: CallbackQuery, state: FSMContext):
-    await state.clear()
-    try:
-        await call.answer("Bot moved: @TopupPrimeBot", show_alert=False)
-    except Exception:
-        pass
-    await call.message.answer(
-        CLOSED_BOT_MESSAGE,
-        reply_markup=await closed_redirect_keyboard(call.from_user.id)
-    )
-
-@router.message(is_regular_user_message)
-async def closed_message_redirect(message: Message, state: FSMContext):
-    await state.clear()
-    await message.answer(
-        CLOSED_BOT_MESSAGE,
-        reply_markup=await closed_redirect_keyboard(message.from_user.id)
-    )
-
 async def user_guard(message: Message) -> bool:
     if not message.from_user:
         return False
